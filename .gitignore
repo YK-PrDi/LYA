@@ -1,0 +1,14 @@
+target/
+dist/
+dist-electron/
+tools/node/
+tools/node_modules/
+tools/browsers/
+electron/node_modules/
+*.log
+.DS_Store
+pdd_cookies.json
+.temp-output/
+.idea/
+build.log
+tools/*.png

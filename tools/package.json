@@ -1,0 +1,16 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "description": "把\"人工转IT字段流程\"系列 xlsx 一键导入到电商模式的品类数据。",
+  "main": "pdd_listing.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

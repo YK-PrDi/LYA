@@ -1,0 +1,28 @@
+server:
+  port: 5021
+
+spring:
+  web:
+    resources:
+      static-locations: "file:./frontend/"
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+app:
+  volcengine:
+    api-key: "${VOLCENGINE_API_KEY:}"
+    base-url: "https://ark.cn-beijing.volces.com/api/v3"
+    model: "doubao-seedance-2-0-260128"
+
+  auth:
+    password: "${APP_PASSWORD:123456}"
+
+  paths:
+    user-data-dir: "./"
+    temp-output-dir: "./.temp-output"
+
+logging:
+  level:
+    com.lyauto: INFO
