@@ -135,10 +135,13 @@ public class ListingController {
             result.put("nodeOk", false);
             result.put("nodeError", e.getMessage());
         }
-        // 检查脚本是否存在
-        java.io.File script = new java.io.File(System.getProperty("user.dir"), "tools/pdd_listing.js");
-        result.put("scriptExists", script.exists());
-        result.put("scriptPath", script.getAbsolutePath());
+        // 检查脚本是否存在（用与实际运行一致的解析逻辑）
+        java.io.File script = listingService.resolvePlaywrightScript();
+        result.put("scriptExists", script != null && script.exists());
+        result.put("scriptPath", script != null ? script.getAbsolutePath() : "");
+        // 诊断信息
+        result.put("resourcesPath", System.getProperty("app.resources-path", ""));
+        result.put("userDir", System.getProperty("user.dir", ""));
         return ResponseEntity.ok(result);
     }
 }

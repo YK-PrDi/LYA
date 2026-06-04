@@ -436,7 +436,7 @@ public class ListingService {
         return task.getId();
     }
 
-    private File resolvePlaywrightScript() {
+    public File resolvePlaywrightScript() {
         // 打包态：resources/tools/pdd_listing.js
         String resourcesPath = System.getProperty("app.resources-path");
         if (resourcesPath != null && !resourcesPath.isBlank()) {
@@ -455,16 +455,29 @@ public class ListingService {
      */
     public String resolveNodeExe() {
         String exe = System.getProperty("os.name", "").toLowerCase().contains("win") ? "node.exe" : "node";
-        // 打包态
+        java.util.List<File> candidates = new java.util.ArrayList<>();
+        // 打包态：app.resources-path 指向 resources/
         String resourcesPath = System.getProperty("app.resources-path");
         if (resourcesPath != null && !resourcesPath.isBlank()) {
-            File f = new File(resourcesPath, "tools/node/" + exe);
-            if (f.isFile()) return f.getAbsolutePath();
+            candidates.add(new File(resourcesPath, "tools/node/" + exe));
+            // 兼容 resourcesPath 可能指向 app 根（resources 的父级）的情形
+            candidates.add(new File(resourcesPath, "resources/tools/node/" + exe));
         }
-        // 源码态
-        File f = new File(System.getProperty("user.dir"), "tools/node/" + exe);
-        if (f.isFile()) return f.getAbsolutePath();
-        // 回退系统 node
+        // 源码态：user.dir/tools/node/
+        candidates.add(new File(System.getProperty("user.dir"), "tools/node/" + exe));
+        // 兜底：从脚本所在 tools 目录推断（resolvePlaywrightScript 同源）
+        File script = resolvePlaywrightScript();
+        if (script != null) {
+            File toolsDir = script.getParentFile();
+            if (toolsDir != null) candidates.add(new File(toolsDir, "node/" + exe));
+        }
+        for (File f : candidates) {
+            if (f.isFile()) {
+                log.info("使用便携 node: {}", f.getAbsolutePath());
+                return f.getAbsolutePath();
+            }
+        }
+        log.warn("未找到便携 node，回退系统 node。已尝试: {}", candidates);
         return "node";
     }
 

@@ -13,11 +13,12 @@
   },
   "build": {
     "appId": "com.lyauto.automation",
-    "productName": "LY-Automation",
+    "productName": "乐羽",
     "win": {
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ],
+      "icon": "build/icon.ico",
       "sign": null
     },
     "nsis": {
@@ -25,7 +26,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "LY-Automation",
+      "shortcutName": "乐羽",
       "runAfterFinish": true
     },
     "extraResources": [

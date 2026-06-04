@@ -65,23 +65,31 @@ function lstToggleCascader(e) {
 }
 
 // fixed 定位面板：移到 body 脱离裁剪，按触发器位置算坐标
+// 搜索框 wrap 也一起移到 body，定位在面板正上方，避免被 fixed 面板盖住导致无法输入
 function lstPositionPanels() {
   try {
     const cas = document.getElementById('lst-cat-cascader');
     const panels = document.getElementById('lst-cat-panels');
+    const searchWrap = document.getElementById('lst-cat-search-wrap');
     if (!cas || !panels || !cas.classList.contains('open')) return;
     if (panels.parentElement !== document.body) document.body.appendChild(panels);
+    if (searchWrap && searchWrap.parentElement !== document.body) document.body.appendChild(searchWrap);
     panels.style.display = 'flex';
     const trig = cas.querySelector('.ec-cascader-trigger') || cas;
     const r = trig.getBoundingClientRect();
     const vh = window.innerHeight, vw = window.innerWidth;
-    const spaceBelow = vh - r.bottom, spaceAbove = r.top;
     const panelW = Math.min(540, vw - 16);
     let left = r.left;
     if (left + panelW > vw - 8) left = Math.max(8, vw - 8 - panelW);
+    // 搜索框高度（移到 body 后用 fixed 定位在触发器正下方）
+    const searchH = (searchWrap && searchWrap.style.display !== 'none') ? 40 : 0;
+    if (searchWrap && searchH) {
+        searchWrap.style.cssText = `display:block;position:fixed;z-index:100000;left:${left}px;top:${r.bottom + 4}px;width:${Math.min(260, vw - 16)}px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:6px 8px;box-shadow:0 4px 16px rgba(0,0,0,.08);`;
+    }
+    const spaceBelow = vh - r.bottom - searchH, spaceAbove = r.top;
     panels.style.left = left + 'px';
     let mh, top;
-    if (spaceBelow >= spaceAbove) { top = r.bottom + 4; mh = Math.max(160, spaceBelow - 12); }
+    if (spaceBelow >= spaceAbove) { top = r.bottom + 4 + searchH; mh = Math.max(160, spaceBelow - 12); }
     else { mh = Math.min(spaceAbove - 12, Math.floor(vh * 0.7)); top = Math.max(8, r.top - 4 - mh); }
     panels.style.top = top + 'px';
     panels.style.maxHeight = 'none';
@@ -92,6 +100,8 @@ function lstPositionPanels() {
 function lstHidePanels() {
     const panels = document.getElementById('lst-cat-panels');
     if (panels && panels.parentElement === document.body) panels.style.display = 'none';
+    const sw = document.getElementById('lst-cat-search-wrap');
+    if (sw && sw.parentElement === document.body) sw.style.display = 'none';
 }
 
 function lstRefreshCascader() {

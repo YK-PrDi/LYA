@@ -75,7 +75,7 @@ function waitForServer(timeoutMs = 90000) {
 function createMain() {
     mainWindow = new BrowserWindow({
         width: 1100, height: 860, minWidth: 720, minHeight: 600,
-        title: 'LY-Automation', show: false, backgroundColor: '#F8FAFC',
+        title: '乐羽', show: false, backgroundColor: '#F8FAFC',
         webPreferences: {
             nodeIntegration: false, contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
