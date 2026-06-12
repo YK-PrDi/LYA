@@ -12,9 +12,12 @@ import java.util.*;
 public class ListingController {
 
     private final ListingService listingService;
+    private final com.lyauto.service.ImageGenService imageGenService;
 
-    public ListingController(ListingService listingService) {
+    public ListingController(ListingService listingService,
+                             com.lyauto.service.ImageGenService imageGenService) {
         this.listingService = listingService;
+        this.imageGenService = imageGenService;
     }
 
     /**
@@ -30,6 +33,9 @@ public class ListingController {
             String category   = (String) body.getOrDefault("category", "");
             String material   = (String) body.getOrDefault("material", "");
             String brand      = (String) body.getOrDefault("brand", "");
+            if (brand == null || brand.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "请先填写品牌（标题最前面必须是品牌）"));
+            }
             @SuppressWarnings("unchecked")
             List<String> skuNames = (List<String>) body.getOrDefault("skuNames",
                                      body.getOrDefault("skuColors", List.of()));
@@ -59,6 +65,46 @@ public class ListingController {
     }
 
     /**
+     * 以参考主图为底，逐个 SKU 生成展示图。
+     * 入参：{ refImagePath, productType, skus:[{name, compDesc}] }
+     * 出参：{ images:[{name, path, error?}] }
+     */
+    @PostMapping("/gen-sku-images")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> genSkuImages(@RequestBody Map<String, Object> body) {
+        try {
+            String refImagePath = (String) body.getOrDefault("refImagePath", "");
+            String productType  = (String) body.getOrDefault("productType", "");
+            String bagImagePath = (String) body.getOrDefault("bagImagePath", "");
+            List<Map<String, Object>> skus = (List<Map<String, Object>>) body.getOrDefault("skus", List.of());
+            String batch = String.valueOf(System.currentTimeMillis());
+
+            List<Map<String, Object>> images = new java.util.ArrayList<>();
+            int seq = 1;
+            for (Map<String, Object> s : skus) {
+                String name = String.valueOf(s.getOrDefault("name", ""));
+                String comp = String.valueOf(s.getOrDefault("compDesc", ""));
+                Object idx  = s.getOrDefault("idx", seq - 1);
+                Map<String, Object> item = new java.util.LinkedHashMap<>();
+                item.put("name", name);
+                item.put("idx", idx);
+                try {
+                    String path = imageGenService.generateSkuImage(refImagePath, name, comp, productType, batch, seq, bagImagePath);
+                    item.put("path", path);
+                } catch (Exception e) {
+                    item.put("error", e.getMessage());
+                }
+                images.add(item);
+                seq++;
+            }
+            return ResponseEntity.ok(Map.of("images", images));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "生图失败：" + e.getMessage()));
+        }
+    }
+
+    /**
      * 启动 Playwright 自动化上新流程（异步）。
      * 入参：ListingConfig JSON，或 { loginOnly: true } 仅触发登录
      * 出参：{ taskId }
@@ -71,10 +117,12 @@ public class ListingController {
                 String taskId = listingService.runLoginOnly();
                 return ResponseEntity.ok(Map.of("taskId", taskId));
             }
-            // 反序列化为 ListingConfig
+            // 反序列化为 ListingConfig（忽略 dryRun/loginOnly 等非 config 字段）
             com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+            om.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
             ListingConfig config = om.convertValue(body, ListingConfig.class);
-            String taskId = listingService.runListing(config);
+            boolean dryRun = Boolean.TRUE.equals(body.get("dryRun"));
+            String taskId = listingService.runListing(config, dryRun);
             return ResponseEntity.ok(Map.of("taskId", taskId));
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
@@ -98,6 +146,77 @@ public class ListingController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "扫描失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 扫描文件夹根目录下的图片，按数字顺序返回（白底图/参考图导入用）。
+     * 入参：{ folderPath }  出参：{ images:[...] }
+     */
+    @PostMapping("/list-images")
+    public ResponseEntity<Map<String, Object>> listImages(@RequestBody Map<String, Object> body) {
+        String folderPath = (String) body.get("folderPath");
+        if (folderPath == null || folderPath.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "folderPath 不能为空"));
+        }
+        try {
+            return ResponseEntity.ok(Map.of("images", listingService.listImagesInFolder(folderPath)));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "扫描失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 导出 SKU 图到目标文件夹的「商品素材」子目录，按 序号_款式名.png 命名。
+     * 入参：{ targetDir, skus:[{name, imgPath}] }
+     * 出参：{ savedDir, count }
+     */
+    @PostMapping("/export-sku-images")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> exportSkuImages(@RequestBody Map<String, Object> body) {
+        try {
+            String targetDir = (String) body.getOrDefault("targetDir", "");
+            List<Map<String, Object>> skus = (List<Map<String, Object>>) body.getOrDefault("skus", List.of());
+            if (targetDir == null || targetDir.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "targetDir 不能为空"));
+            }
+            java.io.File dir = new java.io.File(targetDir, "商品素材");
+            dir.mkdirs();
+            int count = 0, seq = 1;
+            for (Map<String, Object> s : skus) {
+                String imgPath = String.valueOf(s.getOrDefault("imgPath", ""));
+                java.io.File src = new java.io.File(imgPath);
+                if (imgPath.isBlank() || !src.isFile()) { seq++; continue; }
+                String name = String.valueOf(s.getOrDefault("name", "")).trim();
+                String safe = name.replaceAll("[\\\\/:*?\"<>|]", "_");
+                if (safe.isEmpty()) safe = "SKU";
+                String ext = imgPath.toLowerCase().endsWith(".jpg") || imgPath.toLowerCase().endsWith(".jpeg") ? ".jpg" : ".png";
+                java.io.File dst = new java.io.File(dir, seq + "_" + safe + ext);
+                java.nio.file.Files.copy(src.toPath(), dst.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                count++;
+                seq++;
+            }
+            return ResponseEntity.ok(Map.of("savedDir", dir.getAbsolutePath(), "count", count));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "导出失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 取某品类（全路径精确匹配）的产品信息预设属性。
+     * GET /api/listing/product-info?category=家装主材 > 卫浴配件 > 花洒配件 > 花洒喷头
+     * 出参：{ attributes: [{name, value, options:[], manual}] }
+     */
+    @GetMapping("/product-info")
+    public ResponseEntity<Map<String, Object>> productInfo(@RequestParam(defaultValue = "") String category) {
+        try {
+            return ResponseEntity.ok(Map.of("attributes", listingService.productInfoFor(category)));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "读取产品信息预设失败：" + e.getMessage()));
         }
     }
 

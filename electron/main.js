@@ -7,6 +7,10 @@ const fs   = require('fs');
 const PORT    = 5021;
 const APP_URL = `http://localhost:${PORT}`;
 
+// 密钥（不进 git）；缺失时降级为空，避免 clone 后崩溃
+let secret = {};
+try { secret = require('./secret'); } catch (_) { console.warn('未找到 electron/secret.js，AI 相关功能将不可用'); }
+
 let mainWindow  = null;
 let javaProcess = null;
 
@@ -53,7 +57,21 @@ async function startJava() {
         `-Dapp.resources-path=${process.resourcesPath.replace(/\\/g, '/')}`,
         '-jar', jarPath
     ];
-    javaProcess = spawn(javaExe, jvmArgs, { cwd: dataDir, stdio: 'ignore', windowsHide: true });
+    javaProcess = spawn(javaExe, jvmArgs, {
+        cwd: dataDir,
+        stdio: 'ignore',
+        windowsHide: true,
+        env: {
+            ...process.env,
+            VOLCENGINE_API_KEY: secret.VOLCENGINE_API_KEY || '',
+            IMG_PROVIDER: secret.IMG_PROVIDER || '',
+            IMG_BASE_URL: secret.IMG_BASE_URL || '',
+            IMG_MODEL: secret.IMG_MODEL || '',
+            IMG_KEYS: secret.IMG_KEYS || '',
+            IMG_PROXY_HOST: secret.IMG_PROXY_HOST || '',
+            IMG_PROXY_PORT: secret.IMG_PROXY_PORT || '',
+        },
+    });
     javaProcess.on('error', err => console.error('Java 启动失败:', err.message));
 }
 

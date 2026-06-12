@@ -35,9 +35,9 @@ async function randomMouseMove(page) {
     await sleep(rand(100, 300));
 }
 
-/** 模拟人类点击（先移动再点击） */
+/** 模拟人类点击（先移动再点击；hover 失败不阻断） */
 async function humanClick(el, opts = {}) {
-    await el.hover();
+    await el.hover({ timeout: 2000 }).catch(() => {});
     await sleep(rand(80, 200));
     await el.click({ force: true, ...opts });
 }
@@ -120,6 +120,88 @@ async function uploadImagesToArea(page, areaIndex, imgDir) {
         }
     }
     return files.length;
+}
+
+// ── 填写单个属性（beast-core 下拉为主，文本框兜底）──────────────────────
+// 返回 true 表示已填/已选中，false 表示未匹配跳过
+async function fillAttribute(page, attrName, attrValue) {
+    // 1. 用属性名标签定位该属性行（精确文字），找到行内的下拉 input
+    const label = page.locator(`label:has-text("${attrName}")`).first();
+    if (await label.count() === 0) return false;
+    try { await label.scrollIntoViewIfNeeded({ timeout: 3000 }); } catch (_) {}
+
+    // 行容器：标签往上 2-3 层通常含控件；用 xpath 找最近的、包含 select input 的祖先
+    const row = label.locator(
+        'xpath=ancestor-or-self::*[.//input[@data-testid="beast-core-select-htmlInput"]][1]'
+    );
+    const hasSelect = await row.count() > 0
+        && await row.locator('input[data-testid="beast-core-select-htmlInput"]').count() > 0;
+
+    if (hasSelect) {
+        const selInput = row.locator('input[data-testid="beast-core-select-htmlInput"]').first();
+        await selInput.click();
+        await page.waitForTimeout(600);
+        // 2. 多选支持：值按 、，/ 拆分，逐个在浮层里模糊匹配选中（不关闭浮层连续点）
+        const vals = attrValue.split(/[、,，/]/).map(s => s.trim()).filter(Boolean);
+        let any = false;
+        for (const v of vals) {
+            const hit = await pickPortalOption(page, v);
+            if (hit) { any = true; await page.waitForTimeout(250); }
+        }
+        // 选完关闭浮层：先点该属性标签让下拉失焦收起，Escape 兜底
+        try {
+            await label.click({ timeout: 1500, force: true });
+        } catch (_) {}
+        await page.keyboard.press('Escape').catch(() => {});
+        // 若浮层仍在，点页面空白区域强制收起
+        try {
+            const portal = page.locator('[data-testid="beast-core-portal"]');
+            if (await portal.count() > 0 && await portal.last().isVisible().catch(() => false)) {
+                await page.mouse.click(5, 5);
+            }
+        } catch (_) {}
+        await page.waitForTimeout(400);
+        return any;
+    }
+
+    // 3. 文本框兜底
+    const textInput = row.count && await row.count() > 0
+        ? row.locator('input:not([type="file"])').first()
+        : label.locator('xpath=following::input[1]');
+    if (await textInput.count() > 0) {
+        await textInput.fill(attrValue);
+        await page.waitForTimeout(300);
+        return true;
+    }
+    return false;
+}
+
+// 在 beast-core 选项浮层里按双向包含模糊匹配点击选项；虚拟列表会滚动查找
+async function pickPortalOption(page, val) {
+    const portal = page.locator('[data-testid="beast-core-portal"]').last();
+    if (await portal.count() === 0) return false;
+    const v = val.trim();
+
+    for (let scroll = 0; scroll < 12; scroll++) {
+        const opts = portal.locator('li[role="option"]');
+        const n = await opts.count();
+        for (let i = 0; i < n; i++) {
+            const t = (await opts.nth(i).innerText()).trim();
+            if (t && (t.includes(v) || v.includes(t))) {
+                await opts.nth(i).click();
+                return true;
+            }
+        }
+        // 虚拟列表：滚动浮层加载更多
+        const scroller = portal.locator('ul[role="listbox"] > div').first();
+        if (await scroller.count() === 0) break;
+        const before = await scroller.evaluate(el => el.scrollTop).catch(() => 0);
+        await scroller.evaluate(el => { el.scrollTop += 200; }).catch(() => {});
+        await page.waitForTimeout(250);
+        const after = await scroller.evaluate(el => el.scrollTop).catch(() => 0);
+        if (after === before) break; // 滚到底了
+    }
+    return false;
 }
 
 // ── 主流程 ────────────────────────────────────────────────────────────────
@@ -374,11 +456,12 @@ async function main() {
         }
         if (config.attributes) {
             for (const [attrName, attrValue] of Object.entries(config.attributes)) {
-                const attrLabel = await page.$(`[class*="attr-label"]:has-text("${attrName}"), label:has-text("${attrName}")`);
-                if (attrLabel) {
-                    const attrInput = await attrLabel.$('xpath=following-sibling::*//input')
-                        || await attrLabel.$('xpath=following-sibling::input');
-                    if (attrInput) { await attrInput.fill(attrValue); await page.waitForTimeout(300); }
+                if (!attrValue) continue;
+                try {
+                    const ok = await fillAttribute(page, attrName, String(attrValue));
+                    log(ok ? `属性「${attrName}」已填: ${attrValue}` : `属性「${attrName}」未找到匹配项「${attrValue}」，已跳过`);
+                } catch (e) {
+                    log(`属性「${attrName}」填写异常，已跳过: ${e.message}`);
                 }
             }
         }
@@ -501,10 +584,21 @@ async function main() {
                 const sku = config.skus[i];
                 await humanDelay(300, 600);
 
-                // 记录当前空输入框数量（用于判断新框是否已出现）
+                // 规格名输入框也是虚拟滚动：先滚到规格区底部，触发新空框渲染
+                await page.evaluate(() => {
+                    const section = document.getElementById('goods-spec-sku');
+                    if (!section) return;
+                    const scrollers = [section, ...section.querySelectorAll('*')].filter(el => {
+                        const s = getComputedStyle(el);
+                        return /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 20;
+                    });
+                    (scrollers[0] || document.scrollingElement || section).scrollTop = 1e9;
+                });
+                await sleep(400);
+
                 const beforeCount = (await page.$$('#goods-spec-sku input[placeholder="请输入规格名称"]')).length;
 
-                // 只取第一个空的（value 为空）输入框
+                // 取第一个空的（value 为空）输入框
                 const allInps = await page.$$('#goods-spec-sku input[placeholder="请输入规格名称"]');
                 let inp = null;
                 for (const h of allInps) {
@@ -513,10 +607,29 @@ async function main() {
                 }
 
                 if (!inp) {
-                    log(`第${i+1}个规格值：找不到空输入框，跳过: ${sku.name}`);
-                    continue;
+                    // 没有空框了：可能需要点"添加规格值/+"按钮新增一行
+                    const addBtn = page.locator('#goods-spec-sku').locator(
+                        'text=/添加规格值|新增规格值|添加.*款式|\\+ ?添加/'
+                    ).first();
+                    let added = false;
+                    if (await addBtn.count().catch(() => 0) > 0) {
+                        await addBtn.scrollIntoViewIfNeeded().catch(() => {});
+                        await addBtn.click({ timeout: 2000 }).catch(() => {});
+                        await sleep(500);
+                        const ai = await page.$$('#goods-spec-sku input[placeholder="请输入规格名称"]');
+                        for (const h of ai) {
+                            const v = await h.evaluate(el => el.value);
+                            if (!v || v.trim() === '') { inp = h; added = true; break; }
+                        }
+                    }
+                    if (!inp) {
+                        log(`第${i+1}个规格值：找不到空输入框且无法新增行，跳过: ${sku.name}（当前框数=${beforeCount}）`);
+                        continue;
+                    }
+                    if (added) log(`第${i+1}个规格值：点击"添加"后获得新空框`);
                 }
 
+                await inp.scrollIntoViewIfNeeded().catch(() => {});
                 await inp.click({ force: true });
                 await humanDelay(150, 300);
                 // 清空后再输入，防止残留值
@@ -549,24 +662,57 @@ async function main() {
             await closePddPopups();
 
             // 勾选"添加图片"（先滚动到视口内再点击）
-            const addImgLabel = await page.$('label:has-text("添加图片")');
-            const addImgCheckbox = addImgLabel
-                ? await addImgLabel.$('input[type="checkbox"]')
-                : await page.$('input[type="checkbox"][class*="img"]');
-            if (addImgCheckbox) {
-                try {
-                    await addImgCheckbox.scrollIntoViewIfNeeded();
-                    await humanDelay(500, 800);
-                    const checked = await addImgCheckbox.evaluate(el => el.checked);
-                    if (!checked) {
-                        await addImgCheckbox.evaluate(el => el.click());
-                        await humanDelay(500, 800);
-                    }
-                    log('添加图片已勾选');
-                } catch (e) {
-                    log('添加图片复选框操作失败，跳过: ' + e.message.split('\n')[0]);
+            log('STEP: 开始处理"添加图片"复选框');
+            try {
+                let addImgCheckbox = null;
+                const lbl = page.locator('label:has-text("添加图片")').first();
+                if (await lbl.count() > 0) {
+                    const cb = lbl.locator('input[type="checkbox"]').first();
+                    if (await cb.count() > 0) addImgCheckbox = cb;
                 }
+                if (!addImgCheckbox) {
+                    const cb2 = page.locator('input[type="checkbox"][class*="img"]').first();
+                    if (await cb2.count() > 0) addImgCheckbox = cb2;
+                }
+                if (addImgCheckbox) {
+                    await addImgCheckbox.scrollIntoViewIfNeeded().catch(() => {});
+                    await humanDelay(400, 600);
+                    const checked = await addImgCheckbox.evaluate(el => el.checked).catch(() => false);
+                    if (!checked) {
+                        await addImgCheckbox.evaluate(el => el.click()).catch(() => {});
+                        await humanDelay(400, 600);
+                    }
+                    log('STEP: 添加图片已勾选');
+                } else {
+                    log('STEP: 未找到"添加图片"复选框，跳过');
+                }
+            } catch (e) {
+                log('添加图片复选框操作失败，跳过: ' + e.message.split('\n')[0]);
             }
+
+            // 勾选"添加图片"后可能弹出"新增批量上传规格图功能"引导弹窗，关闭它
+            log('STEP: 开始关闭引导弹窗');
+            try {
+                await page.waitForTimeout(800);
+                let closed = false;
+                for (const txt of ['我知道了', '知道了', '我知道啦', '跳过', '不再提示']) {
+                    const btn = page.locator(`button:has-text("${txt}")`).first();
+                    const cnt = await btn.count().catch(() => 0);
+                    if (cnt > 0 && await btn.isVisible().catch(() => false)) {
+                        await btn.click({ timeout: 1500 }).catch(() => {});
+                        log('STEP: 已点击引导弹窗按钮"' + txt + '"');
+                        await page.waitForTimeout(400);
+                        closed = true;
+                        break;
+                    }
+                }
+                if (!closed) log('STEP: 未发现引导弹窗按钮');
+                await page.keyboard.press('Escape').catch(() => {});
+                await page.waitForTimeout(300);
+            } catch (e) {
+                log('关闭引导弹窗操作跳过: ' + e.message.split('\n')[0]);
+            }
+            log('STEP: 进入 SKU 图诊断/上传阶段, dryRun=' + dryRun);
             if (dryRun) {
                 const specState = await page.evaluate(() => {
                     const section = document.getElementById('goods-spec-sku');
@@ -601,9 +747,19 @@ async function main() {
                 fs.writeFileSync(path.join(__dirname, 'sku_input_diag.json'), JSON.stringify(diagResult, null, 2));
                 log('诊断结果已写入: sku_input_diag.json');
             }
+            // 拼多多规格表 file input 是虚拟滚动：任何时刻只渲染可见的 ~11 行，
+            // 无法一次性拿到全部行。故"边滚边传"——逐个 SKU：把它的行滚进视口触发渲染，
+            // 等该行 file input 出现，立即传图。
+            const allSkuNames = config.skus.map(s => (s.name || '').replace(/\s+/g, '')).filter(Boolean);
+            const skippedNoImg = [];
+
             for (let i = 0; i < config.skus.length; i++) {
                 const sku = config.skus[i];
-                if (!sku.imgDir || !fs.existsSync(sku.imgDir)) continue;
+                if (!sku.imgDir || !fs.existsSync(sku.imgDir)) {
+                    log(`SKU[${i}] (${sku.name}) 无图片(imgDir=${sku.imgDir || '空'})，跳过`);
+                    skippedNoImg.push(i + 1);
+                    continue;
+                }
                 const stat = fs.statSync(sku.imgDir);
                 let skuFile;
                 if (stat.isFile()) {
@@ -617,51 +773,78 @@ async function main() {
                 }
                 if (!skuFile) continue;
 
-                // 每次重新取：上传后 input 总数会减 1（已上传的 input 被移除）
-                // 所以始终取 index 8，因为前面已上传的 input 消失后，下一个就顶到 index 8
-                const allImgInputs = await page.$$('#goods-spec-sku input[type="file"]');
-                log(`SKU图片input总数: ${allImgInputs.length}, 目标 index: 8`);
-                const inp = allImgInputs[8];
-                if (!inp) { log(`SKU[${i}] 找不到图片 input (index 8)`); continue; }
+                const key = sku.name.replace(/\s+/g, '');
+                // 在浏览器内：按"行内只含本 SKU 名"找到该行，scrollIntoView 触发渲染，
+                // 并给其 file input 打 data-upload-target 标记返回是否找到。
+                const found = await page.evaluate((args) => {
+                    const { target, allNames } = args;
+                    const section = document.getElementById('goods-spec-sku');
+                    if (!section) return false;
+                    // 先清旧标记
+                    section.querySelectorAll('[data-upload-target]').forEach(el => el.removeAttribute('data-upload-target'));
+                    const rows = section.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"]');
+                    for (const row of rows) {
+                        const txt = row.textContent.replace(/\s+/g, '');
+                        if (!txt.includes(target)) continue;
+                        if (allNames.filter(n => n && txt.includes(n)).length !== 1) continue; // 排除批量大容器
+                        const inp = row.querySelector('input[type="file"]');
+                        if (!inp) continue;
+                        row.scrollIntoView({ block: 'center' });
+                        inp.setAttribute('data-upload-target', '1');
+                        return true;
+                    }
+                    return false;
+                }, { target: key, allNames: allSkuNames });
+
+                if (!found) { log(`SKU[${i}] (${sku.name}) 滚动后仍找不到对应行，跳过`); skippedNoImg.push(i + 1); continue; }
+                await page.waitForTimeout(400);
+                const inp = await page.$('#goods-spec-sku input[type="file"][data-upload-target="1"]');
+                if (!inp) { log(`SKU[${i}] 标记后找不到 file input，跳过`); skippedNoImg.push(i + 1); continue; }
                 await inp.setInputFiles(skuFile);
-                // 等待 loading 遮罩消失
                 await page.waitForFunction(() => !document.querySelector('.init-loading, [class*="init-loading"]'), { timeout: 8000 }).catch(() => {});
                 await humanDelay(800, 1200);
-                log(`SKU图片已上传[${i}]: ${path.basename(skuFile)}`);
+                log(`SKU图片已上传[${i}] ${sku.name}: ${path.basename(skuFile)}`);
+            }
+            if (skippedNoImg.length) {
+                log(`⚠ 警告：第 ${skippedNoImg.join('、')} 行 SKU 未能上传图片，请检查这些 SKU 的图或名称匹配`);
             }
 
             // ── STEP 9.5：发布前检测 SKU 图是否都上传成功，缺的补传 ──
-            // 上传成功后该行 file input 会消失，剩余 input 应回到基础数量（8 个非 SKU 行）
-            // 若仍有 index>=8 的 file input，说明对应 SKU 行漏传了，按顺序补传
+            // 上传成功后该 SKU 行的 file input 会消失；按名称重新定位仍存在 input 的行补传。
             {
-                const baseCount = 8; // index 0-7 为非 SKU 行（本地上传按钮 + header 等）
-                let retry = 0;
-                while (retry < config.skus.length) {
-                    const cur = await page.$$('#goods-spec-sku input[type="file"]');
-                    const missing = cur.length - baseCount; // 还剩几个 SKU 行未传
-                    if (missing <= 0) { log('SKU图检测：全部已上传 ✓'); break; }
-                    // 漏传的是最后 missing 个 SKU（前面成功的已消失，剩下的顶到 index 8）
-                    const idx = config.skus.length - missing; // 对应 config.skus 的下标
-                    const sku = config.skus[idx];
-                    log(`SKU图检测：第 ${idx + 1} 个(${sku ? sku.name : '?'}) 漏传，补传中...`);
-                    if (sku && sku.imgDir && fs.existsSync(sku.imgDir)) {
+                let round = 0;
+                while (round < 2) {
+                    let fixedCount = 0;
+                    const allNames2 = config.skus.map(s => (s.name || '').replace(/\s+/g, '')).filter(Boolean);
+                    for (let i = 0; i < config.skus.length; i++) {
+                        const sku = config.skus[i];
+                        if (!sku.imgDir || !fs.existsSync(sku.imgDir)) continue;
+                        const h = await page.evaluateHandle((args) => {
+                            const { target, allNames } = args;
+                            const section = document.getElementById('goods-spec-sku');
+                            if (!section) return null;
+                            for (const el of section.querySelectorAll('input[type="file"]')) {
+                                const row = el.closest('tr, [class*="row"], [class*="Row"], [class*="item"]');
+                                const txt = row ? row.textContent.replace(/\s+/g, '') : '';
+                                if (!txt.includes(target)) continue;
+                                if (allNames.filter(n => txt.includes(n)).length === 1) return el;
+                            }
+                            return null;
+                        }, { target: sku.name.replace(/\s+/g, ''), allNames: allNames2 });
+                        const inp = h && h.asElement ? h.asElement() : null;
+                        if (!inp) continue; // 该行 input 已消失 = 已传成功
                         const stat = fs.statSync(sku.imgDir);
-                        let skuFile = stat.isFile() ? sku.imgDir
+                        const skuFile = stat.isFile() ? sku.imgDir
                             : fs.readdirSync(sku.imgDir).filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort().map(f => path.join(sku.imgDir, f))[0];
-                        if (skuFile && cur[baseCount]) {
-                            await cur[baseCount].setInputFiles(skuFile);
-                            await page.waitForFunction(() => !document.querySelector('.init-loading, [class*="init-loading"]'), { timeout: 8000 }).catch(() => {});
-                            await humanDelay(800, 1200);
-                            log(`补传完成: ${path.basename(skuFile)}`);
-                        }
+                        if (!skuFile) continue;
+                        log(`SKU图补传：第 ${i + 1} 个(${sku.name})`);
+                        await inp.setInputFiles(skuFile);
+                        await page.waitForFunction(() => !document.querySelector('.init-loading, [class*="init-loading"]'), { timeout: 8000 }).catch(() => {});
+                        await humanDelay(800, 1200);
+                        fixedCount++;
                     }
-                    retry++;
-                }
-                // 最终核对
-                const finalCur = await page.$$('#goods-spec-sku input[type="file"]');
-                const stillMissing = finalCur.length - baseCount;
-                if (stillMissing > 0) {
-                    log(`⚠ 警告：仍有 ${stillMissing} 个 SKU 图未上传成功，请手动检查后再提交`);
+                    if (fixedCount === 0) { log('SKU图检测：全部已上传 ✓'); break; }
+                    round++;
                 }
             }
 
@@ -726,8 +909,78 @@ async function main() {
                 log('列诊断idx24: ' + JSON.stringify({ lastHtml: colDiag.lastInputHtml, lastParent: colDiag.lastParentHtml?.substring(0,150) }));
             }
 
+            // 取价格区所有可见"请输入"框及其所在行的标识，用于正确分组
+            const priceInputsInfo = await page.evaluate(() => {
+                const section = document.getElementById('goods-spec-sku');
+                if (!section) return [];
+                const inputs = [...section.querySelectorAll('input[placeholder="请输入"]')]
+                    .filter(el => el.offsetParent !== null);
+                return inputs.map((el, idx) => {
+                    // 找最近的"行"容器，用其在父列表中的位置做行号
+                    const row = el.closest('tr, [class*="row"], [class*="Row"], [class*="item"]');
+                    let rowKey = 'none', rowTag = '', rowCls = '';
+                    if (row) {
+                        const sib = [...(row.parentElement ? row.parentElement.children : [])];
+                        rowKey = String(sib.indexOf(row));
+                        rowTag = row.tagName;
+                        rowCls = (row.className || '').toString().slice(0, 40);
+                    }
+                    return { idx, rowKey, rowTag, rowCls };
+                });
+            });
+            log(`价格框分布(前15): ${JSON.stringify(priceInputsInfo.slice(0, 15))}`);
+            log(`价格框总数: ${priceInputsInfo.length}`);
+            // 批量设置入口 + 表格结构诊断
+            const batchDiag = await page.evaluate(() => {
+                const section = document.getElementById('goods-spec-sku');
+                if (!section) return { error: 'no section' };
+                // 找"批量"相关按钮/文本
+                const batchEls = [...section.querySelectorAll('*')].filter(el => {
+                    const t = (el.childElementCount === 0 ? el.textContent : '').trim();
+                    return /批量(设置|填写|操作)|一键设置/.test(t);
+                }).map(el => ({ tag: el.tagName, cls: (el.className||'').toString().slice(0,40), txt: el.textContent.trim().slice(0,20) }));
+                // 所有 table 及各自 tr 数
+                const tables = [...section.querySelectorAll('table')].map((tb, i) => ({
+                    i, rows: tb.querySelectorAll('tr').length,
+                    rowsWithInput: [...tb.querySelectorAll('tr')].filter(r => r.querySelector('input[placeholder="请输入"]')).length,
+                    cls: (tb.className||'').toString().slice(0,30)
+                }));
+                return { batchEls: batchEls.slice(0, 8), tables };
+            });
+            log(`批量入口诊断: ${JSON.stringify(batchDiag)}`);
+            // 虚拟列表行结构诊断：看行靠什么标识真实行号（data-*/aria-rowindex/transform/top）
+            const rowStructDiag = await page.evaluate(() => {
+                const section = document.getElementById('goods-spec-sku');
+                if (!section) return 'no section';
+                const tbl = [...section.querySelectorAll('table')].find(t => t.querySelector('input[placeholder="请输入"]'));
+                if (!tbl) return 'no price table';
+                const rows = [...tbl.querySelectorAll('tr')].filter(r => r.querySelector('input[placeholder="请输入"]'));
+                const sample = rows.slice(0, 3).map(r => {
+                    const attrs = {};
+                    for (const a of r.attributes) attrs[a.name] = a.value.slice(0, 30);
+                    const cs = getComputedStyle(r);
+                    return { attrs, top: r.offsetTop, transform: cs.transform.slice(0, 30), position: cs.position, rectTop: Math.round(r.getBoundingClientRect().top) };
+                });
+                // 滚动容器内有没有"撑高占位"元素（虚拟列表特征）
+                let scroller = tbl.parentElement, scrollerInfo = 'none';
+                while (scroller && scroller !== document.body) {
+                    const s = getComputedStyle(scroller);
+                    if (/(auto|scroll)/.test(s.overflowY) && scroller.scrollHeight > scroller.clientHeight + 10) {
+                        scrollerInfo = { cls: (scroller.className||'').toString().slice(0,30), scrollH: scroller.scrollHeight, clientH: scroller.clientHeight };
+                        break;
+                    }
+                    scroller = scroller.parentElement;
+                }
+                const rowH = rows.length >= 2 ? Math.round(rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top) : 0;
+                return { sampleRows: sample, scroller: scrollerInfo, rowHeight: rowH, renderedRows: rows.length };
+            });
+            log(`行结构诊断: ${JSON.stringify(rowStructDiag)}`);
+            // 统计每个 rowKey 的框数分布，看清是否有行不足4个框被过滤
+            const rowKeyCount = {};
+            priceInputsInfo.forEach(x => { rowKeyCount[x.rowKey] = (rowKeyCount[x.rowKey] || 0) + 1; });
+            log(`各行框数分布(rowKey:框数): ${JSON.stringify(rowKeyCount)}`);
+
             // 直接按 goods-spec-sku 内的全部 "请输入" input 按顺序分组
-            // 每行有5列：库存 | 拼单价 | 单买价 | 规格编码 | 商家编码
             const allPriceInputs = await page.evaluate(() => {
                 const section = document.getElementById('goods-spec-sku');
                 if (!section) return [];
@@ -737,39 +990,159 @@ async function main() {
             });
             log(`价格区域可见 "请输入" inputs: ${allPriceInputs.length} 个`);
 
-            // 列顺序（诊断确认）：[0]=库存, [1]=拼单价, [2]=单买价, [3]=规格编码
-            // header 那行的库存 input 排在最后（idx 24），不影响前面 6*4=24 个
-            const COLS_PER_ROW = 4;
-            const HEADER_OFFSET = 0;
             const maxGroupPrice = Math.max(...config.skus.map(s => s.groupPrice / 100));
             const batchSinglePrice = (maxGroupPrice + 1).toFixed(2);
+
+            // 价格表是虚拟滚动，不可靠 offsetTop 定位（行高不固定，第12行起易错位）。
+            // 改用 SKU 名称文本匹配定位行——与 SKU 图上传阶段（第779行）同策略：
+            // 在 goods-spec-sku 内遍历价格表行，按行内 textContent 匹配 SKU 名称，
+            // scrollIntoView 触发虚拟列表渲染，再标记该行的"请输入"input 后填入。
+            // 去重大容器行：一行含多个 SKU 名称的是汇总行，跳过。
+            const allNamesP = config.skus.map(s => (s.name || '').replace(/\s+/g, '')).filter(Boolean);
 
             for (let i = 0; i < config.skus.length; i++) {
                 const sku = config.skus[i];
                 const groupPriceYuan = parseFloat((sku.groupPrice / 100).toFixed(2));
-
-                await randomMouseMove(page);
+                const key = (sku.name || '').replace(/\s+/g, '');
                 log(`处理第 ${i+1} 行 SKU: ${sku.name}`);
 
-                const allInpHandlesRaw = await page.$$('#goods-spec-sku input[placeholder="请输入"]');
-                const allInpHandles = [];
-                for (const h of allInpHandlesRaw) {
-                    const vis = await h.evaluate(el => el.offsetParent !== null);
-                    if (vis) allInpHandles.push(h);
+                if (!key) { log(`第 ${i+1} 行 SKU 名称为空，跳过`); continue; }
+
+                // 按 SKU 名称在价格表中匹配行（最多尝试 8 次，等虚拟列表渲染）
+                let found = false;
+                for (let attempt = 0; attempt < 8 && !found; attempt++) {
+                    found = await page.evaluate((args) => {
+                        const { target, allNames } = args;
+                        const section = document.getElementById('goods-spec-sku');
+                        if (!section) return false;
+                        section.querySelectorAll('[data-pcell]').forEach(el => el.removeAttribute('data-pcell'));
+
+                        // 找价格表（含"请输入"框的 table）
+                        const tbls = [...section.querySelectorAll('table')].filter(t => t.querySelector('input[placeholder="请输入"]'));
+                        if (!tbls.length) return false;
+
+                        for (const tbl of tbls) {
+                            const rows = [...tbl.querySelectorAll('tr')].filter(r => {
+                                if (r.querySelectorAll('input[placeholder="请输入"]').length < 2) return false;
+                                const t = r.textContent.replace(/\s+/g, '');
+                                return !/全部款式|批量|启用\/停用|如实填写|承诺发货|全屏编辑/.test(t);
+                            });
+
+                            for (const row of rows) {
+                                const txt = row.textContent.replace(/\s+/g, '');
+                                if (!txt.includes(target)) continue;
+                                // 去重：该行含其他 SKU 名数量>3 的是大容器行（如批量行），跳过
+                                const matchedCount = allNames.filter(n => n && n !== target && txt.includes(n)).length;
+                                if (matchedCount > 3) continue;
+
+                                row.scrollIntoView({ block: 'center' });
+                                const ins = [...row.querySelectorAll('input[placeholder="请输入"]')];
+                                ins.forEach((el, c) => el.setAttribute('data-pcell', String(c)));
+                                return true;
+                            }
+                        }
+                        return false;
+                    }, { target: key, allNames: allNamesP });
+
+                    if (!found) await page.waitForTimeout(400);
                 }
-                const rowStart = HEADER_OFFSET + i * COLS_PER_ROW;
-                // [rowStart+0]=库存，[rowStart+1]=拼单价，[rowStart+2]=单买价，[rowStart+3]=规格编码
-                const stockInp    = allInpHandles[rowStart];
-                const groupInp    = allInpHandles[rowStart + 1];
-                const singleInp   = allInpHandles[rowStart + 2];
-                const itemCodeInp = allInpHandles[rowStart + 3];
 
-                if (stockInp) { await humanType(page, stockInp, '8888'); await humanDelay(200, 400); }
-                if (groupInp) { await humanType(page, groupInp, groupPriceYuan.toFixed(2)); await humanDelay(200, 400); }
-                if (singleInp) { await humanType(page, singleInp, batchSinglePrice); await humanDelay(200, 400); }
-                if (itemCodeInp && sku.itemCode) { await humanType(page, itemCodeInp, sku.itemCode); await humanDelay(200, 400); }
+                // 名称匹配失败：回退 offsetTop 定位（兼容少数直接行匹配不到的场景）
+                if (!found) {
+                    log(`第 ${i+1} 行名称匹配未找到，回退 offsetTop 定位`);
+                    let picked = { ok: false };
+                    for (let attempt = 0; attempt < 6 && !picked.ok; attempt++) {
+                        await page.evaluate((rowIndex) => {
+                            const section = document.getElementById('goods-spec-sku');
+                            if (!section) return;
+                            const tbl = [...section.querySelectorAll('table')].find(t => t.querySelector('input[placeholder="请输入"]'));
+                            if (!tbl) return;
+                            let scroller = tbl.parentElement;
+                            while (scroller && scroller !== document.body) {
+                                const s = getComputedStyle(scroller);
+                                if (/(auto|scroll)/.test(s.overflowY) && scroller.scrollHeight > scroller.clientHeight + 10) break;
+                                scroller = scroller.parentElement;
+                            }
+                            if (scroller && scroller !== document.body) scroller.scrollTop = Math.max(0, rowIndex * 88 - 40);
+                        }, i);
+                        await page.waitForTimeout(350);
+                        picked = await page.evaluate((rowIndex) => {
+                            const section = document.getElementById('goods-spec-sku');
+                            if (!section) return { ok: false };
+                            section.querySelectorAll('[data-pcell]').forEach(el => el.removeAttribute('data-pcell'));
+                            const tbl = [...section.querySelectorAll('table')].find(t => t.querySelector('input[placeholder="请输入"]'));
+                            if (!tbl) return { ok: false };
+                            const rowH = 88;
+                            const targetTop = rowIndex * rowH;
+                            const rows = [...tbl.querySelectorAll('tr')].filter(r => {
+                                if (r.querySelectorAll('input[placeholder="请输入"]').length < 2) return false;
+                                const t = r.textContent.replace(/\s+/g, '');
+                                return !/全部款式|批量|启用\/停用|如实填写|承诺发货|全屏编辑/.test(t);
+                            });
+                            let best = null, bestDist = 1e9;
+                            for (const r of rows) {
+                                const d = Math.abs(r.offsetTop - targetTop);
+                                if (d < bestDist) { bestDist = d; best = r; }
+                            }
+                            if (!best || bestDist > rowH) return { ok: false, bestDist, rendered: rows.length };
+                            const ins = [...best.querySelectorAll('input[placeholder="请输入"]')];
+                            ins.forEach((el, c) => el.setAttribute('data-pcell', String(c)));
+                            return { ok: true };
+                        }, i);
+                        if (!picked.ok) await page.waitForTimeout(200);
+                    }
+                    if (!picked.ok) { log(`第 ${i+1} 行 offsetTop 定位也失败（bestDist=${picked.bestDist}, rendered=${picked.rendered}），跳过`); continue; }
+                }
 
+                await page.waitForTimeout(150);
+
+                const fillCell = async (c, value) => {
+                    if (value === undefined || value === null || value === '') return;
+                    const el = await page.$(`#goods-spec-sku input[data-pcell="${c}"]`);
+                    if (!el) { log(`  列${c}找不到输入框`); return; }
+                    await el.scrollIntoViewIfNeeded().catch(() => {});
+                    await humanType(page, el, String(value));
+                    await humanDelay(150, 300);
+                };
+                await fillCell(0, String(sku.stock || 8888));      // 库存（使用配置值，不再硬编码）
+                await fillCell(1, groupPriceYuan.toFixed(2));       // 拼单价
+                await fillCell(2, batchSinglePrice);                // 单买价
+                if (sku.itemCode) await fillCell(3, sku.itemCode);  // 规格编码
                 await humanDelay(300, 600);
+            }
+
+            // 填完后验证：检查是否还有空白库存/价格行（兜底补填）
+            {
+                const emptyRows = await page.evaluate(() => {
+                    const section = document.getElementById('goods-spec-sku');
+                    if (!section) return [];
+                    const tbls = [...section.querySelectorAll('table')].filter(t => t.querySelector('input[placeholder="请输入"]'));
+                    const result = [];
+                    for (const tbl of tbls) {
+                        const rows = [...tbl.querySelectorAll('tr')].filter(r => {
+                            if (r.querySelectorAll('input[placeholder="请输入"]').length < 2) return false;
+                            const t = r.textContent.replace(/\s+/g, '');
+                            return !/全部款式|批量|启用\/停用|如实填写|承诺发货|全屏编辑/.test(t);
+                        });
+                        for (const row of rows) {
+                            const ins = [...row.querySelectorAll('input[placeholder="请输入"]')];
+                            const emptyCols = [];
+                            // 只检查前两列（库存和拼单价）是否为空
+                            for (let c = 0; c < Math.min(2, ins.length); c++) {
+                                if (!ins[c].value || ins[c].value.trim() === '') emptyCols.push(c);
+                            }
+                            if (emptyCols.length > 0) {
+                                result.push({ rowText: row.textContent.replace(/\s+/g, ' ').trim().substring(0, 60), emptyCols });
+                            }
+                        }
+                    }
+                    return result;
+                });
+                if (emptyRows.length > 0) {
+                    log(`⚠ 价格验证：发现 ${emptyRows.length} 行仍有空字段: ${JSON.stringify(emptyRows.slice(0, 5))}`);
+                } else {
+                    log('✓ 价格验证：所有行库存和拼单价均已填写');
+                }
             }
 
             // 填写商品参考价（拼单价+2）— 全局一个字段

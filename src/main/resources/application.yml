@@ -23,6 +23,20 @@ app:
     user-data-dir: "./"
     temp-output-dir: "./.temp-output"
 
+  kuaimai:
+    app-key: "${KUAIMAI_APP_KEY:1919696999}"
+    app-secret: "${KUAIMAI_APP_SECRET:d739120d19e94e94a6b581128824efc5}"
+    access-token: "${KUAIMAI_ACCESS_TOKEN:5e05abcf738241b183f088ada0d541c6}"
+    refresh-token: "${KUAIMAI_REFRESH_TOKEN:16e32b299ec34916bf46c59630a8ad4c}"
+
+  gpt-image:
+    provider: "${IMG_PROVIDER:gemini}"
+    base-url: "${IMG_BASE_URL:https://generativelanguage.googleapis.com}"
+    model: "${IMG_MODEL:gemini-2.5-flash-image}"
+    keys: "${IMG_KEYS:}"
+    proxy-host: "${IMG_PROXY_HOST:}"
+    proxy-port: "${IMG_PROXY_PORT:0}"
+
 logging:
   level:
     com.lyauto: INFO

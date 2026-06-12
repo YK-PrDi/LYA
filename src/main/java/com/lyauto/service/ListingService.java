@@ -20,15 +20,17 @@ public class ListingService {
 
     private final AppProperties appProperties;
     private final TaskService taskService;
+    private final ImageGenService imageGenService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final OkHttpClient http = new OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
         .build();
 
-    public ListingService(AppProperties appProperties, TaskService taskService) {
+    public ListingService(AppProperties appProperties, TaskService taskService, ImageGenService imageGenService) {
         this.appProperties = appProperties;
         this.taskService = taskService;
+        this.imageGenService = imageGenService;
     }
 
     /**
@@ -139,88 +141,49 @@ public class ListingService {
             }
         }
 
-        // 没有图片则回落纯文本版
+        // 没有图片则回落标题库纯文本版
         if (imgPaths.isEmpty()) {
-            return prepareWithAI(catLeaf, catLeaf, brand, skuNames);
+            return prepareFromTitleLib(category, material, brand, skuNames);
         }
 
+        List<String> refTitles = titleRefByCategory(category);
+        String refBlock = refTitles.isEmpty()
+            ? "（无参考标题，按品类自行生成爆款风格）"
+            : String.join("\n", refTitles);
+        String brandStr2 = brandStr.isEmpty() ? "本店" : brandStr;
+
         String prompt = String.format(
-            "你是拼多多电商运营专家。请仔细观察这些商品主图，判断商品的外观、功能和卖点，" +
-            "结合以下信息生成商品标题和SKU款式名。\n\n" +
+            "你是拼多多电商运营专家。请仔细观察这些商品主图，识别商品外观、功能和卖点，" +
+            "结合下面同品类爆款标题的关键词风格，生成商品标题和SKU款式名。\n\n" +
+            "【同品类爆款标题参考（学其关键词和结构，不要照抄）】\n%s\n\n" +
             "商品品类：%s\n材质：%s\n品牌：%s\nSKU列表：%s\n\n" +
             "要求：\n" +
-            "1. 商品标题：30个汉字以内，开头可放品牌，必须包含从图片观察到的核心卖点营销词" +
-            "（如\"三档增压\"\"亲肤不刺痛\"\"免打孔\"\"大容量\"\"加厚\"等），符合拼多多搜索习惯；" +
-            "可参考同类爆款标题的风格，但绝对不要抄袭任何品牌商标名。\n" +
-            "2. SKU款式名：每个SKU对应一个款式名，与标题风格一致，15字以内。\n\n" +
+            "1. 商品标题【第一个词必须是品牌「%s」】，紧跟品类和卖点关键词；\n" +
+            "2. 标题长度【严格 27-30 个汉字】（含品牌），不足则补图中观察到的卖点关键词" +
+            "（如\"三档增压\"\"亲肤不刺痛\"\"免打孔\"\"加厚\"\"304不锈钢\"等），超出则精简；\n" +
+            "3. 必须包含从图片观察到的核心卖点，符合拼多多搜索习惯；\n" +
+            "4. 绝不要出现参考标题里别人的品牌商标名；\n" +
+            "5. 同时为每个SKU生成一个15字以内款式名，风格与标题一致。\n\n" +
             "请严格按以下JSON格式返回，不要有其他内容：\n" +
             "{\"title\":\"商品标题\",\"skuNames\":{\"SKU1\":\"款式名1\",\"SKU2\":\"款式名2\"}}",
-            catLeaf, materialStr, brandStr, skuStr
+            refBlock, catLeaf, materialStr, brandStr, skuStr, brandStr2
         );
 
+        if (imgPaths.isEmpty()) {
+            // 无图：走标题库纯文本
+            return prepareFromTitleLib(category, material, brand, skuNames);
+        }
         try {
-            String apiKey = appProperties.getVolcengine().getApiKey();
-            String baseUrl = appProperties.getVolcengine().getBaseUrl();
-            if (apiKey == null || apiKey.isBlank()) {
-                throw new RuntimeException("Volcengine API Key 未配置（VOLCENGINE_API_KEY）");
-            }
-
-            // 组装多模态 content：先文字，再图片（最多取前 3 张）
-            List<Map<String, Object>> contentArr = new ArrayList<>();
-            contentArr.add(Map.of("type", "text", "text", prompt));
-            int imgCount = 0;
-            for (String p : imgPaths) {
-                if (imgCount >= 3) break;
-                String dataUri = toDataUri(p);
-                if (dataUri == null) continue;
-                contentArr.add(Map.of(
-                    "type", "image_url",
-                    "image_url", Map.of("url", dataUri)
-                ));
-                imgCount++;
-            }
-            if (imgCount == 0) {
-                // 图片都读不出来，回落纯文本
-                return prepareWithAI(catLeaf, catLeaf, brand, skuNames);
-            }
-
-            String requestBody = objectMapper.writeValueAsString(Map.of(
-                "model", "doubao-1.5-vision-pro-32k-250115",
-                "messages", List.of(Map.of("role", "user", "content", contentArr))
-            ));
-
-            Request req = new Request.Builder()
-                .url(baseUrl + "/chat/completions")
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
-                .build();
-
-            try (Response resp = http.newCall(req).execute()) {
-                String body = resp.body() != null ? resp.body().string() : "";
-                if (!resp.isSuccessful()) {
-                    throw new RuntimeException("视觉 API 调用失败 " + resp.code() + ": " + body);
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> respMap = objectMapper.readValue(body, Map.class);
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) respMap.get("choices");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                String content = (String) message.get("content");
-
-                int start = content.indexOf('{');
-                int end = content.lastIndexOf('}');
-                if (start >= 0 && end > start) content = content.substring(start, end + 1);
-
-                @SuppressWarnings("unchecked")
-                Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
-                return parsed;
-            }
+            String content = imageGenService.geminiText(prompt, imgPaths);
+            int start = content.indexOf('{');
+            int end = content.lastIndexOf('}');
+            if (start >= 0 && end > start) content = content.substring(start, end + 1);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
+            return parsed;
         } catch (Exception e) {
             log.error("看图生成标题失败: {}", e.getMessage(), e);
-            // 降级：回落纯文本版
-            Map<String, Object> fallback = prepareWithAI(catLeaf, catLeaf, brand, skuNames);
+            Map<String, Object> fallback = prepareFromTitleLib(category, material, brand, skuNames);
             fallback.put("error", e.getMessage());
             return fallback;
         }
@@ -245,12 +208,6 @@ public class ListingService {
         List<String> refTitles = readTitleLib();
 
         try {
-            String apiKey = appProperties.getVolcengine().getApiKey();
-            String baseUrl = appProperties.getVolcengine().getBaseUrl();
-            if (apiKey == null || apiKey.isBlank()) {
-                throw new RuntimeException("Volcengine API Key 未配置（VOLCENGINE_API_KEY）");
-            }
-
             String refBlock = refTitles.isEmpty()
                 ? "（无参考标题，请根据品类自行生成同类爆款风格标题）"
                 : String.join("\n", refTitles);
@@ -270,37 +227,13 @@ public class ListingService {
                 "请严格按以下JSON格式返回，不要有其他内容：\n" +
                 "{\"title\":\"商品标题\",\"skuNames\":{\"SKU1\":\"款式名1\"}}";
 
-            String requestBody = objectMapper.writeValueAsString(Map.of(
-                "model", "doubao-seed-2-0-lite-260215",
-                "messages", List.of(Map.of("role", "user", "content", prompt))
-            ));
-
-            Request req = new Request.Builder()
-                .url(baseUrl + "/chat/completions")
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
-                .build();
-
-            try (Response resp = http.newCall(req).execute()) {
-                String body = resp.body() != null ? resp.body().string() : "";
-                if (!resp.isSuccessful()) {
-                    throw new RuntimeException("标题生成 API 失败 " + resp.code() + ": " + body);
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> respMap = objectMapper.readValue(body, Map.class);
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) respMap.get("choices");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                String content = (String) message.get("content");
-                int start = content.indexOf('{');
-                int end = content.lastIndexOf('}');
-                if (start >= 0 && end > start) content = content.substring(start, end + 1);
-                @SuppressWarnings("unchecked")
-                Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
-                return parsed;
-            }
+            String content = imageGenService.geminiText(prompt, null);
+            int start = content.indexOf('{');
+            int end = content.lastIndexOf('}');
+            if (start >= 0 && end > start) content = content.substring(start, end + 1);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
+            return parsed;
         } catch (Exception e) {
             log.error("标题库生成标题失败: {}", e.getMessage(), e);
             Map<String, Object> fallback = prepareWithAI(catLeaf, catLeaf, brand, skuNames);
@@ -309,18 +242,18 @@ public class ListingService {
         }
     }
 
-    /** 读取项目根目录 标题库.xlsx 的 A 列，每行一条标题。读不到返回空列表。 */
+    /** 读取项目根目录 商品标题库.xlsx 的 A 列，每行一条标题。读不到返回空列表。 */
     private List<String> readTitleLib() {
         List<String> titles = new ArrayList<>();
-        File f = new File(System.getProperty("user.dir"), "标题库.xlsx");
+        File f = new File(System.getProperty("user.dir"), "商品标题库.xlsx");
         if (!f.isFile()) {
             String rp = System.getProperty("app.resources-path");
             if (rp != null && !rp.isBlank()) {
-                File rf = new File(rp, "标题库.xlsx");
+                File rf = new File(rp, "商品标题库.xlsx");
                 if (rf.isFile()) f = rf;
             }
         }
-        if (!f.isFile()) { log.warn("标题库.xlsx 未找到: {}", f.getAbsolutePath()); return titles; }
+        if (!f.isFile()) { log.warn("商品标题库.xlsx 未找到: {}", f.getAbsolutePath()); return titles; }
         try (java.io.FileInputStream fis = new java.io.FileInputStream(f);
              org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(fis)) {
             org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
@@ -334,6 +267,113 @@ public class ListingService {
             log.warn("读取标题库失败: {}", e.getMessage());
         }
         return titles;
+    }
+
+    /**
+     * 按品类从标题库取参考标题。标题库用分组行（如"花洒商品标题""架类商品标题"）分隔两组。
+     * category 含"花洒"/"淋浴"取花洒组，否则取架类组；切不出来则返回全部。
+     */
+    private List<String> titleRefByCategory(String category) {
+        List<String> all = readTitleLib();
+        if (all.isEmpty()) return all;
+        boolean isShower = category != null && (category.contains("花洒") || category.contains("淋浴"));
+        List<String> shower = new ArrayList<>(), shelf = new ArrayList<>();
+        List<String> cur = null;
+        for (String t : all) {
+            if (t.contains("花洒商品标题")) { cur = shower; continue; }
+            if (t.contains("架类商品标题") || t.contains("架商品标题")) { cur = shelf; continue; }
+            // 样板行的分组标题行（以"商品标题"结尾且很短）跳过
+            if (t.endsWith("商品标题") && t.length() <= 8) { continue; }
+            if (cur != null) cur.add(t);
+        }
+        List<String> picked = isShower ? shower : shelf;
+        return picked.isEmpty() ? all : picked;
+    }
+
+    /**
+     * 解析 产品信息填写参考.xlsx：品类全路径 → 属性列表。
+     * 分组行含" > "切换品类；其余行按首个"："切分 name/value：
+     *   value 含"（人工选择）" → 去后缀按"/"拆 options、manual=true；
+     *   value=="人工选择" 或 无值 → manual=true、value 空；
+     *   否则固定预填值。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, List<Map<String, Object>>> readProductInfoPresets() {
+        Map<String, List<Map<String, Object>>> presets = new LinkedHashMap<>();
+        File f = new File(System.getProperty("user.dir"), "产品信息填写参考.xlsx");
+        if (!f.isFile()) {
+            String rp = System.getProperty("app.resources-path");
+            if (rp != null && !rp.isBlank()) {
+                File rf = new File(rp, "产品信息填写参考.xlsx");
+                if (rf.isFile()) f = rf;
+            }
+        }
+        if (!f.isFile()) { log.warn("产品信息填写参考.xlsx 未找到: {}", f.getAbsolutePath()); return presets; }
+
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(f);
+             org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(fis)) {
+            org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
+            String curCat = null;
+            for (int r = 0; r <= sheet.getLastRowNum(); r++) {
+                org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String line = getCellStr(row.getCell(0)).trim();
+                if (line.isEmpty()) continue;
+
+                if (line.contains(" > ") || line.contains(">")) {
+                    curCat = line.replace("　", " ").trim();
+                    presets.putIfAbsent(curCat, new ArrayList<>());
+                    continue;
+                }
+                if (curCat == null) continue;
+
+                String name, value;
+                int idx = line.indexOf('：');
+                if (idx < 0) idx = line.indexOf(':');
+                if (idx >= 0) { name = line.substring(0, idx).trim(); value = line.substring(idx + 1).trim(); }
+                else { name = line.trim(); value = ""; }
+
+                Map<String, Object> attr = new LinkedHashMap<>();
+                attr.put("name", name);
+                List<String> options = new ArrayList<>();
+                boolean manual = false;
+                String fixed = "";
+
+                if (value.contains("人工选择") || value.contains("人工")) {
+                    manual = true;
+                    String opt = value.replace("（人工选择）", "").replace("(人工选择)", "")
+                                      .replace("人工选择", "").replace("人工", "").trim();
+                    if (!opt.isEmpty()) {
+                        for (String o : opt.split("/")) if (!o.trim().isEmpty()) options.add(o.trim());
+                    }
+                } else if (value.isEmpty()) {
+                    manual = true;
+                } else {
+                    fixed = value;
+                }
+                attr.put("value", fixed);
+                attr.put("options", options);
+                attr.put("manual", manual);
+                presets.get(curCat).add(attr);
+            }
+        } catch (Exception e) {
+            log.warn("读取产品信息参考表失败: {}", e.getMessage());
+        }
+        return presets;
+    }
+
+    /** 取某品类（全路径精确匹配）的预设属性，无匹配返回空列表。 */
+    public List<Map<String, Object>> productInfoFor(String category) {
+        if (category == null) return new ArrayList<>();
+        Map<String, List<Map<String, Object>>> all = readProductInfoPresets();
+        String key = category.replace("›", ">").replace("　", " ").trim();
+        // 规整空格：把 ">"两侧空格统一为" > "
+        String norm = key.replaceAll("\\s*>\\s*", " > ");
+        for (Map.Entry<String, List<Map<String, Object>>> e : all.entrySet()) {
+            String ek = e.getKey().replaceAll("\\s*>\\s*", " > ");
+            if (ek.equals(norm)) return e.getValue();
+        }
+        return new ArrayList<>();
     }
 
     /** 读取本地图片转 data URI（base64）。读取失败返回 null。 */
@@ -359,6 +399,10 @@ public class ListingService {
      * 返回 taskId，前端通过 /api/task/{taskId} 轮询进度。
      */
     public String runListing(ListingConfig config) throws Exception {
+        return runListing(config, false);
+    }
+
+    public String runListing(ListingConfig config, boolean dryRun) throws Exception {
         GenerationTask task = taskService.createTask(10);
 
         File scriptFile = resolvePlaywrightScript();
@@ -379,16 +423,17 @@ public class ListingService {
         taskService.submit(task, () -> {
             Process proc = null;
             try {
-                ProcessBuilder pb = new ProcessBuilder(resolveNodeExe(), scriptFile.getAbsolutePath())
-                    .directory(projectRoot)
-                    .redirectErrorStream(false);
+                ProcessBuilder pb = dryRun
+                    ? new ProcessBuilder(resolveNodeExe(), scriptFile.getAbsolutePath(), "--dry-run")
+                        .directory(projectRoot).redirectErrorStream(false)
+                    : new ProcessBuilder(resolveNodeExe(), scriptFile.getAbsolutePath())
+                        .directory(projectRoot).redirectErrorStream(false);
                 pb.environment().putAll(buildPlaywrightEnv(configJson));
                 proc = pb.start();
 
-                // 写 stdin
-                try (OutputStream os = proc.getOutputStream()) {
-                    os.write(configJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                }
+                // config 已通过环境变量 PDD_CONFIG 传递（脚本优先读 env）。
+                // 立即关闭 stdin，避免脚本不读 stdin 时后端 write 阻塞、卡死读 stdout。
+                try { proc.getOutputStream().close(); } catch (Exception ignore) {}
 
                 // 读 stdout 解析进度
                 try (BufferedReader reader = new BufferedReader(
@@ -553,88 +598,51 @@ public class ListingService {
         result.put("whiteImgDir",  whiteImgDir  != null ? whiteImgDir  : "");
         result.put("skuImgDir",    skuImgDir    != null ? skuImgDir    : "");
 
-        // ── 找 xlsx 文件 ──
-        File[] xlsxFiles = root.listFiles(f -> f.isFile() && f.getName().toLowerCase().endsWith(".xlsx"));
-        if (xlsxFiles == null || xlsxFiles.length == 0) {
-            warnings.add("未找到 .xlsx 文件");
-            result.put("skus", List.of());
-            result.put("warnings", warnings);
-            return result;
-        }
-        File excelFile = xlsxFiles[0];
-        result.put("excelFile", excelFile.getName());
-
-        // ── 解析 xlsx ──
-        List<Map<String, Object>> skus = new ArrayList<>();
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(excelFile);
-             org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(fis)) {
-
-            org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
-            int headerRow = -1, codeCol = 0, priceCol = 2, groupPriceCol = 8, costCol = 1;
-
-            // 找表头行（含"商品编码"的行）
-            for (int r = 0; r <= Math.min(5, sheet.getLastRowNum()); r++) {
-                org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
-                if (row == null) continue;
-                org.apache.poi.ss.usermodel.Cell c0 = row.getCell(0);
-                if (c0 != null && "商品编码".equals(getCellStr(c0).trim())) {
-                    headerRow = r;
-                    for (int c = 0; c < row.getLastCellNum(); c++) {
-                        String h = getCellStr(row.getCell(c)).trim();
-                        if ("价格".equals(h))        priceCol      = c;
-                        else if ("拼单价".equals(h)) groupPriceCol = c;
-                        else if ("总成本".equals(h)) costCol       = c;
-                    }
-                    break;
-                }
+        // ── 扫描 SKU 图片，按文件名自然数字顺序排序 ──
+        List<String> skuImages = new ArrayList<>();
+        if (skuImgDir != null) {
+            File[] imgs = new File(skuImgDir).listFiles(f ->
+                f.isFile() && f.getName().toLowerCase().matches(".*\\.(jpg|jpeg|png|webp|bmp|gif)$"));
+            if (imgs != null) {
+                Arrays.sort(imgs, java.util.Comparator.comparing(
+                    f -> f.getName(), ListingService::naturalCompare));
+                for (File f : imgs) skuImages.add(f.getAbsolutePath());
             }
-
-            if (headerRow < 0) {
-                warnings.add("Excel 中未找到「商品编码」表头行");
-            } else {
-                final String skuDir = skuImgDir;
-                for (int r = headerRow + 1; r <= sheet.getLastRowNum(); r++) {
-                    org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
-                    if (row == null) continue;
-                    String code = getCellStr(row.getCell(codeCol)).trim();
-                    if (code.isEmpty()) continue;
-
-                    double price      = getCellDouble(row.getCell(priceCol));
-                    double groupPrice = getCellDouble(row.getCell(groupPriceCol));
-                    double cost       = getCellDouble(row.getCell(costCol));
-
-                    // 在 SKU 子文件夹中按文件名（不含扩展名）匹配图片
-                    String imgPath = "";
-                    if (skuDir != null) {
-                        File[] imgs = new File(skuDir).listFiles(f -> {
-                            String base = f.getName().replaceAll("\\.[^.]+$", "");
-                            return f.isFile() && base.equals(code);
-                        });
-                        if (imgs != null && imgs.length > 0) {
-                            imgPath = imgs[0].getAbsolutePath();
-                        } else {
-                            warnings.add("SKU图未找到: " + code);
-                        }
-                    }
-
-                    Map<String, Object> sku = new LinkedHashMap<>();
-                    sku.put("name",        code);
-                    sku.put("itemCode",    code);
-                    sku.put("cost",        cost);
-                    sku.put("groupPrice",  groupPrice);
-                    sku.put("singlePrice", price);
-                    sku.put("stock",       999);
-                    sku.put("imgPath",     imgPath);
-                    skus.add(sku);
-                }
-            }
-        } catch (Exception e) {
-            warnings.add("Excel 解析失败: " + e.getMessage());
+        } else {
+            warnings.add("未找到 SKU 图片文件夹（命名需含\"sku\"/\"款式\"/\"颜色\"）");
         }
 
-        result.put("skus", skus);
+        result.put("skuImages", skuImages);
         result.put("warnings", warnings);
         return result;
+    }
+
+    /** 扫描某文件夹根目录下的图片，按文件名自然数字顺序返回绝对路径列表。 */
+    public List<String> listImagesInFolder(String folderPath) {
+        List<String> out = new ArrayList<>();
+        File dir = new File(folderPath);
+        if (!dir.isDirectory()) return out;
+        File[] imgs = dir.listFiles(f ->
+            f.isFile() && f.getName().toLowerCase().matches(".*\\.(jpg|jpeg|png|webp|bmp|gif)$"));
+        if (imgs != null) {
+            Arrays.sort(imgs, java.util.Comparator.comparing(
+                f -> f.getName(), ListingService::naturalCompare));
+            for (File f : imgs) out.add(f.getAbsolutePath());
+        }
+        return out;
+    }
+
+    /** 文件名自然排序：1 < 2 < 10（按文件名中的数字段比较）。 */
+    private static int naturalCompare(String a, String b) {
+        String na = a.replaceAll("\\.[^.]+$", "").replaceAll("\\D", "");
+        String nb = b.replaceAll("\\.[^.]+$", "").replaceAll("\\D", "");
+        if (!na.isEmpty() && !nb.isEmpty()) {
+            try {
+                int cmp = Long.compare(Long.parseLong(na), Long.parseLong(nb));
+                if (cmp != 0) return cmp;
+            } catch (NumberFormatException ignore) {}
+        }
+        return a.compareTo(b);
     }
 
     /**
@@ -647,34 +655,67 @@ public class ListingService {
         String productName    = (String) req.getOrDefault("productName", "");
         String brand          = (String) req.getOrDefault("brand", "");
         String material       = (String) req.getOrDefault("material", "");
-        String strategy       = (String) req.getOrDefault("pricingStrategy", "mid");
         int    planCount      = ((Number) req.getOrDefault("planCount", 3)).intValue();
         List<Map<String, Object>> skus = (List<Map<String, Object>>) req.getOrDefault("skus", List.of());
 
-        String strategyLabel = switch (strategy) {
-            case "high" -> "高毛利，目标毛利率 45-65%";
-            case "low"  -> "低毛利，目标毛利率 10-20%";
-            default     -> "中毛利，目标毛利率 25-35%";
-        };
-
-        StringBuilder skuLines = new StringBuilder();
+        // 按 role 分组：主件（main，缺省）/ 配件（accessory）/ 批量件（batch，可不同数量打包）
+        StringBuilder mainLines = new StringBuilder();
+        StringBuilder accLines  = new StringBuilder();
+        StringBuilder batchLines = new StringBuilder();
+        int mainCount = 0;
         for (Map<String, Object> s : skus) {
-            skuLines.append(s.get("itemCode")).append(" | 成本 ").append(s.get("cost")).append(" 元\n");
+            String role = String.valueOf(s.getOrDefault("role", "main"));
+            String line = s.getOrDefault("itemCode", "") + " | " + s.getOrDefault("name", "") + "\n";
+            if ("accessory".equals(role)) {
+                accLines.append(line);
+            } else if ("batch".equals(role)) {
+                batchLines.append(line);
+            } else {
+                mainLines.append(line);
+                mainCount++;
+            }
         }
+        if (accLines.length() == 0) accLines.append("（无独立配件，可只用主件单独成 SKU）\n");
+        if (batchLines.length() == 0) batchLines.append("（无批量件）\n");
 
         String prompt = String.format(
-            "你是拼多多电商运营专家，请根据以下信息生成 %d 套不同的 SKU 布局和定价方案。\n\n" +
-            "商品品类：%s\n商品简称：%s，品牌：%s，材质：%s\n定价策略：%s\n\n" +
-            "现有 SKU 成本数据（商品编码 | 成本）：\n%s\n" +
-            "要求：\n" +
-            "1. 每套方案给出不同的 SKU 组合逻辑（如阶梯装、套餐组合、单品精简、多规格测试等）\n" +
-            "2. 每个 SKU 给出：款式名（功能词+颜色/型号+品名，15字以内）、拼单价、单买价\n" +
-            "3. 定价需满足目标毛利率，拼单价约为单买价的 0.85-0.92 倍\n" +
-            "4. 每套方案给出简短说明（30字以内）\n" +
-            "5. itemCode 保持与输入一致，不要修改\n\n" +
-            "严格按以下 JSON 格式返回，不要有其他内容：\n" +
-            "{\"plans\":[{\"planName\":\"方案一：xxx\",\"description\":\"...\",\"skus\":[{\"name\":\"...\",\"itemCode\":\"...\",\"groupPrice\":0.0,\"singlePrice\":0.0,\"stock\":999}]}]}",
-            planCount, category, productName, brand, material, strategyLabel, skuLines
+            "你是拼多多电商运营专家。用户已选定主件款式和共享配件（来自ERP）。\n"
+            + "拼多多商品是【二维规格】：维度一=主件（颜色/款式，多个并排），维度二=型号（配件组合阶梯，所有主件共享同一组型号）。\n"
+            + "【关键要求】请生成 %d 套不同的「搭配方案」，每套方案 = 一个完整商品，同时包含全部 %d 个主件 和一组共享型号。"
+            + "主件数量不影响方案数量：要 %d 套就出 %d 套，绝不要按主件拆分相乘。\n\n"
+            + "本阶段只做\"搭配 + 命名\"，不要定价。\n\n"
+            + "【商品品类】%s\n【商品简称】%s，品牌：%s，材质：%s\n"
+            + "【主件清单（编码 | 名称）——作为维度一，全部并排】\n%s\n"
+            + "【共享配件清单（编码 | 名称）——用于拼装维度二的型号】\n%s\n"
+            + "【批量件清单（编码 | 名称）——可按不同数量打包成不同型号，如5个装/10个装】\n%s\n"
+            + "【方案结构】每套方案含两个维度：\n"
+            + "- mainItems：全部主件，每个给 itemCode 和 specName（颜色/款式简名，如\"银色花洒\"\"带止水银色花洒\"）\n"
+            + "- models：一组型号（所有主件共享），每个型号给 specName 和 components。"
+            + "components 只列【配件/批量件】编码及数量（不含主件本身）。型号按\"配件由少到多\"阶梯排列，"
+            + "第一个型号通常是\"单品\"（components 为空）。\n\n"
+            + "【数量档位规则（重点）】\n"
+            + "- 批量件可按不同数量打包成不同型号，用 components 里的 qty 表示个数（如 qty=5 即5个装、qty=10 即10个装）\n"
+            + "- 市场需求档位不确定，应铺多个数量档位让运营跑数据，如：单品/+3个装/+5个装/+10个装\n"
+            + "- 型号 specName 必须体现数量和价值点，如\"过滤喷头+10支滤芯【可用1年】\"\"+5支滤芯【半年装】\"\"+3支滤芯\"\n"
+            + "- 滤芯等耗材类批量件可与支架、软管叠加\n\n"
+            + "【多套方案差异化策略】\n"
+            + "- 精简款：3-4个型号，主推单品和热门组合\n"
+            + "- 全阶梯款：单品→+配件1→+配件2→+全配件，覆盖所有价格带\n"
+            + "- 套餐款：突出高配组合（多配件/多滤芯打包），拉高客单价\n"
+            + "- 数量档位测试款：同一主件配批量件的不同数量（1/3/5/10个装），铺多档跑需求数据\n\n"
+            + "【命名规范——必须带营销卖点词，参考标题库风格】\n"
+            + "- 主件 specName：颜色/款式 + 营销卖点，如\"【雅黑色】过滤按摩增压\"\"月光银-过滤净水\"\"枪灰304不锈钢旗舰款\"，不要只写裸色名\n"
+            + "- 型号 specName：用营销化的配件描述，如\"增压亲肤单喷头\"\"喷头+不锈钢支架\"\"喷头+1.5米防爆软管\"\"过滤喷头+5个滤芯\"，不要只写\"+支架\"这种干巴巴的简写\n"
+            + "- 卖点词库（务必融入）：增压、亲肤、过滤、一键止水、免安装一体发货、加厚硅胶防滑、稳固不晃、防爆\n"
+            + "- 每个 specName 控制在 6-15 字，既有卖点又简洁\n"
+            + "- 绝不要把\"手喷袋子\"\"好评卡\"\"胶纸\"等包材写进任何 specName\n\n"
+            + "【输出格式】严格按JSON，不要其他内容：\n"
+            + "{\"plans\":[{\"planName\":\"方案名\",\"description\":\"30字内策略说明\","
+            + "\"mainItems\":[{\"itemCode\":\"主件编码\",\"specName\":\"银色花洒\"}],"
+            + "\"models\":[{\"specName\":\"单品\",\"components\":[]},{\"specName\":\"+支架\",\"components\":[{\"itemCode\":\"配件编码\",\"qty\":1}]}]}]}\n"
+            + "itemCode 必须用清单里的真实编码，不要编造。",
+            planCount, mainCount, planCount, planCount,
+            category, productName, brand, material, mainLines, accLines, batchLines
         );
 
         String apiKey = appProperties.getVolcengine().getApiKey();

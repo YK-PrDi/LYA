@@ -12,3 +12,5 @@ pdd_cookies.json
 .idea/
 build.log
 tools/*.png
+electron/secret.js
+src/main/resources/application-local.yml

@@ -115,6 +115,10 @@ public class ListingConfig {
         private int stock;
         /** 商品编码（可选） */
         private String itemCode;
+        /** 规格维度一：颜色/主件（二维SKU，如"银色花洒"） */
+        private String spec1;
+        /** 规格维度二：型号（二维SKU，如"+支架+软管"） */
+        private String spec2;
 
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
@@ -128,5 +132,9 @@ public class ListingConfig {
         public void setStock(int stock) { this.stock = stock; }
         public String getItemCode() { return itemCode; }
         public void setItemCode(String itemCode) { this.itemCode = itemCode; }
+        public String getSpec1() { return spec1; }
+        public void setSpec1(String spec1) { this.spec1 = spec1; }
+        public String getSpec2() { return spec2; }
+        public void setSpec2(String spec2) { this.spec2 = spec2; }
     }
 }
