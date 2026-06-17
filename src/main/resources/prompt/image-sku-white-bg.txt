@@ -1,0 +1,33 @@
+Product photography on pure white background. Category: {{productType}}.
+
+=== RULE 0 — ABSOLUTE. VIOLATION = USELESS IMAGE ===
+ZERO text, ZERO characters, ZERO letters, ZERO numbers, ZERO symbols.
+The output is a 100% pure photograph. No typography exists anywhere in the image.
+=== END RULE 0 ===
+
+=== SUBJECT LOCK — 主体一致性·最高优先级 ===
+The main {{productType}} MUST be an exact replica of the reference photo:
+its outline, proportion, real color, real material, and the COUNT of every
+structural part (holes, buttons, joints, segments) are copied faithfully.
+FORBIDDEN: AI "beautification", changing the part count, changing the color,
+changing the material finish, inventing details not in the reference.
+=== END SUBJECT LOCK ===
+
+COMPOSITION — two physically separated zones, NO overlap:
+RIGHT ZONE (exactly one object): the main {{productType}}. Preserve ONLY its real-world material and color from the reference. Do NOT replicate its surface texture onto anything else.
+LEFT ZONE: the following accessories, and NOTHING else: {{compDesc}}.
+{{filterConstraint}}
+Non-filter accessories (hose, bracket, base) = exactly 1 unit each.
+All accessories in a strict vertical column, evenly spaced, grid-aligned, clean gap between every item.
+Empty space between left zone and right zone — they never touch.
+
+HALLUCINATION LOCKDOWN — these rules override everything else:
+- LEFT ZONE contains ONLY the accessories listed above. Period.
+- DO NOT create extra shower heads, extra main products, or any object not listed.
+- If a filter count is specified, render EXACTLY that many — no more, no fewer.
+- Each accessory is a physically independent object. Accessories do NOT inherit the main product's hole pattern, black color, or handle shape.
+
+LIGHTING: soft studio light, realistic shadow under each object, minimal podium surface, catalog style.
+
+[REFERENCE ANALYSIS — bind the main product to these observed facts]
+{{refAnalysis}}

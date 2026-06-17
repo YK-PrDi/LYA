@@ -14,13 +14,54 @@ public class ListingController {
     private final ListingService listingService;
     private final com.lyauto.service.ImageGenService imageGenService;
     private final com.lyauto.service.PromptTemplateService templateService;
+    private final com.lyauto.service.AccessoryRuleService accessoryRuleService;
 
     public ListingController(ListingService listingService,
                              com.lyauto.service.ImageGenService imageGenService,
-                             com.lyauto.service.PromptTemplateService templateService) {
+                             com.lyauto.service.PromptTemplateService templateService,
+                             com.lyauto.service.AccessoryRuleService accessoryRuleService) {
         this.listingService = listingService;
         this.imageGenService = imageGenService;
         this.templateService = templateService;
+        this.accessoryRuleService = accessoryRuleService;
+    }
+
+    /** 配件搭配规则库：读取（前端规则编辑用）。 */
+    @GetMapping("/accessory-rules")
+    public ResponseEntity<String> getAccessoryRules() {
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .body(accessoryRuleService.loadJson());
+    }
+
+    /** 配件搭配规则库：保存。 */
+    @PostMapping("/accessory-rules")
+    public ResponseEntity<Map<String, Object>> saveAccessoryRules(@RequestBody String json) {
+        try {
+            accessoryRuleService.saveJson(json);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "保存规则失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 全自动上新·第一步：只选了主件，按规则库解析出该搭配哪些配件/批量件 + 阶梯型号。
+     * 入参：{ category, mainItemCode, erpSkus:[{itemCode,name}...] }
+     * 出参：{ ladders:[...], accSkus:[{itemCode,name,role,keyword,defaultQty}...] }
+     * 前端拿到后复用现有 calc-combo-cost → pricing → prepare → gen-sku-images 链路。
+     */
+    @PostMapping("/auto-resolve")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> autoResolve(@RequestBody Map<String, Object> body) {
+        try {
+            String category = String.valueOf(body.getOrDefault("category", ""));
+            String mainCode = String.valueOf(body.getOrDefault("mainItemCode", ""));
+            List<Map<String, Object>> erpSkus = (List<Map<String, Object>>) body.getOrDefault("erpSkus", List.of());
+            return ResponseEntity.ok(accessoryRuleService.resolveForMain(category, mainCode, erpSkus));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "规则解析失败：" + e.getMessage()));
+        }
     }
 
     /** 防比价模板库：读取（前端下拉/编辑用）。 */

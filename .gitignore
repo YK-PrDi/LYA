@@ -14,3 +14,17 @@ build.log
 tools/*.png
 electron/secret.js
 src/main/resources/application-local.yml
+
+# 构建产物 / 缓存 / 运行时数据
+out/
+electron/build/
+.firecrawl/
+sku-gen/
+kuaimai-sku-cache.json
+tools/sku_input_diag.json
+
+# 本地素材 / 表格（不入库）
+/*.xlsx
+花洒1/
+sku参考.jpg
+

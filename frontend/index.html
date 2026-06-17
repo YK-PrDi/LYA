@@ -74,6 +74,7 @@
     <h1>乐羽</h1>
     <button onclick="openHelpModal()" style="font-size:0.74rem;padding:3px 10px;border:1px solid var(--primary);border-radius:6px;background:var(--primary-light);color:var(--primary);cursor:pointer;">📖 使用说明</button>
     <span class="badge">拼多多自动上新</span>
+    <button onclick="openSettingsModal()" title="设置" style="margin-left:auto;font-size:0.9rem;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;">⚙️</button>
   </div>
   <div id="listingConfig">
     <div style="font-size:0.78rem;color:var(--text-dim);line-height:1.5;padding:8px 10px;background:var(--primary-light);border-radius:6px;margin-bottom:14px;">
@@ -97,27 +98,11 @@
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-      <div class="config-group" style="flex:0 0 auto;">
-        <label>材质 <span style="color:#dc2626;">*</span></label>
-        <div class="gf-select" tabindex="0" id="lstMaterialSelect" style="width:120px;">
-          <input type="hidden" id="lstMaterial" value="碳钢">
-          <div class="gf-select-header" onclick="toggleSelect(this, event)"><span class="gf-select-text">碳钢</span><svg class="gf-select-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></div>
-          <div class="gf-select-options">
-            <div class="gf-option selected" data-value="碳钢" onclick="selectOption(this,event)">碳钢</div>
-            <div class="gf-option" data-value="不锈钢" onclick="selectOption(this,event)">不锈钢</div>
-            <div class="gf-option" data-value="塑料" onclick="selectOption(this,event)">塑料</div>
-            <div class="gf-option" data-value="铝合金" onclick="selectOption(this,event)">铝合金</div>
-            <div class="gf-option" data-value="铁" onclick="selectOption(this,event)">铁</div>
-            <div class="gf-option" data-value="木" onclick="selectOption(this,event)">木</div>
-            <div class="gf-option" data-value="竹" onclick="selectOption(this,event)">竹</div>
-            <div class="gf-option" data-value="__custom__" onclick="lstMaterialCustom()" style="color:var(--primary);border-top:1px dashed var(--border);">✏️ 自定义...</div>
-          </div>
-        </div>
-        <input type="text" id="lstMaterialCustomInput" placeholder="自定义材质" style="display:none;margin-top:4px;width:120px;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;" oninput="document.getElementById('lstMaterial').value=this.value">
-      </div>
+      <!-- 材质统一在右侧「产品信息」面板维护，这里只留隐藏值兜底（默认塑料） -->
+      <input type="hidden" id="lstMaterial" value="塑料">
       <div class="config-group" style="flex:1;min-width:120px;">
-        <label>品牌（可选）</label>
-        <input type="text" id="lstBrand" placeholder="如：GOFU" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;">
+        <label>品牌 <span style="color:#dc2626;">*</span></label>
+        <input type="text" id="lstBrand" value="GOFU" placeholder="如：GOFU" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;">
       </div>
       <div class="config-group" style="flex:0 0 auto;">
         <label>规格类型</label>
@@ -144,7 +129,7 @@
       <div id="lstDropZone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px 12px;border:2px dashed var(--border);border-radius:8px;cursor:pointer;text-align:center;" onclick="lstPickRootDir()" ondragenter="event.preventDefault();event.stopPropagation();lstOnDragOver(event)" ondragover="lstOnDragOver(event)" ondragleave="lstOnDragLeave(event)" ondrop="lstOnDrop(event)">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         <span id="lstDropZoneText" style="font-size:0.75rem;color:var(--text-dim);">点击选择 或 拖入商品文件夹</span>
-        <span style="font-size:0.68rem;color:var(--text-dim);opacity:.7;">文件夹内只需：主图 / 详情图 子文件夹（SKU图由系统「🎨生成SKU图」生成，白底图单独导入）</span>
+        <span style="font-size:0.68rem;color:var(--text-dim);opacity:.7;">文件夹内放：主图 / 详情图 / 白底图 子文件夹（白底图随文件夹一起识别并自动匹配 SKU；SKU 图由「🎨生成SKU图」生成）</span>
       </div>
       <div id="lstFolderStatus" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface-alt);border-radius:6px;font-size:0.73rem;color:var(--text-dim);line-height:1.7;"></div>
       <input type="hidden" id="lstMainImgDir"><input type="hidden" id="lstDetailImgDir"><input type="hidden" id="lstWhiteImgDir">
@@ -292,6 +277,56 @@
     <div class="modal-footer" style="flex-shrink:0;">
       <button class="btn-outline" style="flex:1" onclick="closeSkuImgModal()">取消</button>
       <button id="siGenBtn" class="btn-primary" style="flex:2" onclick="siGenerate()">开始生成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div id="settingsModal" class="modal-overlay">
+  <div class="modal-card" style="width:460px;max-width:94vw;display:flex;flex-direction:column;">
+    <div class="modal-header"><h3>⚙️ 设置</h3><button class="close-btn" onclick="closeSettingsModal()">×</button></div>
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:16px;">
+      <div>
+        <div style="font-size:0.78rem;font-weight:600;margin-bottom:6px;">上新模式</div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;margin-bottom:4px;cursor:pointer;">
+          <input type="radio" name="setMode" value="manual" checked> 人工（逐步：选品→搭配→定价→生图→确认→上架）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer;">
+          <input type="radio" name="setMode" value="auto"> 全自动（只选主件→自动搭配/定价/生图→确认后自动上架）
+        </label>
+      </div>
+      <div>
+        <div style="font-size:0.78rem;font-weight:600;margin-bottom:6px;">方案数量</div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;margin-bottom:4px;cursor:pointer;">
+          <input type="radio" name="setPlan" value="1" checked> 1 套（测试用，省成本）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer;">
+          <input type="radio" name="setPlan" value="multi"> 多套预览
+        </label>
+      </div>
+      <div>
+        <div style="font-size:0.78rem;font-weight:600;margin-bottom:6px;">配件搭配规则</div>
+        <button onclick="openRuleEditor()" style="font-size:0.74rem;padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;">📋 编辑规则库</button>
+        <div style="font-size:0.68rem;color:var(--text-dim);margin-top:4px;">全自动模式下，按此规则把"只选的主件"扩展成配件/批量件搭配。</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" style="flex:1" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 配件规则编辑 -->
+<div id="ruleEditorModal" class="modal-overlay">
+  <div class="modal-card" style="width:720px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;">
+    <div class="modal-header"><h3>📋 配件搭配规则库</h3><button class="close-btn" onclick="closeRuleEditor()">×</button></div>
+    <div style="padding:10px 20px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-dim);flex-shrink:0;">
+      JSON 直接编辑。byCategory 按品类配规则，byMainCode 按主件编码覆盖。accessories=配件关键字+角色(accessory/batch)，ladders=阶梯型号（留空则交 AI 自由组合）。
+    </div>
+    <textarea id="ruleJson" style="flex:1;min-height:320px;margin:12px 20px;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:monospace;font-size:0.72rem;resize:vertical;"></textarea>
+    <div class="modal-footer">
+      <button class="btn-outline" style="flex:1" onclick="closeRuleEditor()">取消</button>
+      <button class="btn-primary" style="flex:2" onclick="saveRules()">保存</button>
     </div>
   </div>
 </div>

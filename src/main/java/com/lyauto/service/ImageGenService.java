@@ -135,6 +135,20 @@ public class ImageGenService {
         return dir;
     }
 
+    /** 人像参考图：从 classpath assets/portrait.png 落地到用户目录一次，返回文件。失败返回 null。 */
+    private File portraitRefFile() {
+        try {
+            File f = new File(appProperties.getPaths().getUserDataDir(), "assets/portrait.png");
+            if (f.isFile()) return f;
+            f.getParentFile().mkdirs();
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream("assets/portrait.png")) {
+                if (is == null) return null;
+                Files.write(f.toPath(), is.readAllBytes());
+            }
+            return f;
+        } catch (Exception e) { log.warn("人像参考图落地失败: {}", e.getMessage()); return null; }
+    }
+
     /**
      * 解码 b64 图片，缩放到最长边 ≤1024，转 JPG 保存（quality 0.9），返回输出文件。
      * 拼多多对单图尺寸/体积有限制，2K PNG 偏大易上传失败，故统一压成 1024 JPG。
@@ -399,6 +413,11 @@ public class ImageGenService {
                 refs.clear();
                 if (hasWhiteBg) refs.add(whiteBgRef);
                 if (hasRef) refs.add(ref);
+                // 人像模板：附上人像白底图参考，让模型把人像手里的花洒换成本款
+                if (Boolean.TRUE.equals(tpl.get("usePortraitImg"))) {
+                    File portrait = portraitRefFile();
+                    if (portrait != null && portrait.isFile()) refs.add(portrait);
+                }
             } else {
                 String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
                 prompt = showerTemplate

@@ -196,6 +196,11 @@ function lstOnCatSearch() {
 
 // ── 产品信息属性面板 ──
 let lstAttributes = [];  // [{name, value, options:[], manual}]
+// 取产品信息面板里「材质」的值（右侧材质，优先于隐藏默认值）
+function panelMaterialVal() {
+    const a = (lstAttributes || []).find(x => (x.name || '').trim() === '材质' && (x.value || '').trim());
+    return a ? a.value.trim() : '';
+}
 
 async function lstLoadProductInfo() {
     if (!lstCatPath.length) return;
@@ -213,6 +218,10 @@ async function lstLoadProductInfo() {
     } catch (_) {
         lstAttributes = [];
     }
+    // 强制材质默认塑料：有「材质」属性但空则填塑料；没有则新增一个默认塑料
+    const matAttr = lstAttributes.find(a => (a.name || '').trim() === '材质');
+    if (matAttr) { if (!(matAttr.value || '').trim()) matAttr.value = '塑料'; }
+    else { lstAttributes.unshift({ name: '材质', value: '塑料', options: ['塑料','碳钢','不锈钢','铝合金','铁','木','竹'], manual: false }); }
     lstRenderAttrs();
 }
 
@@ -338,6 +347,51 @@ async function openSkuImgModal() {
 }
 
 function closeSkuImgModal() { document.getElementById('skuImgModal')?.classList.remove('show'); }
+
+// ── 设置（人工/全自动、方案数）存 localStorage ──
+function lyGetSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem('lySettings') || '{}') || {}; } catch (_) {}
+    return { mode: s.mode || 'manual', planMode: s.planMode || '1' };
+}
+function openSettingsModal() {
+    const s = lyGetSettings();
+    document.querySelectorAll('input[name="setMode"]').forEach(r => r.checked = (r.value === s.mode));
+    document.querySelectorAll('input[name="setPlan"]').forEach(r => r.checked = (r.value === s.planMode));
+    document.getElementById('settingsModal')?.classList.add('show');
+}
+function closeSettingsModal() { document.getElementById('settingsModal')?.classList.remove('show'); }
+function saveSettings() {
+    const mode = document.querySelector('input[name="setMode"]:checked')?.value || 'manual';
+    const planMode = document.querySelector('input[name="setPlan"]:checked')?.value || '1';
+    localStorage.setItem('lySettings', JSON.stringify({ mode, planMode }));
+    closeSettingsModal();
+    alert('设置已保存：' + (mode === 'auto' ? '全自动' : '人工') + '模式，' + (planMode === '1' ? '1 套' : '多套'));
+}
+
+// ── 配件规则库编辑 ──
+async function openRuleEditor() {
+    try {
+        const resp = await fetch('/api/listing/accessory-rules');
+        const txt = await resp.text();
+        document.getElementById('ruleJson').value = JSON.stringify(JSON.parse(txt), null, 2);
+    } catch (e) { document.getElementById('ruleJson').value = '{\n  "byCategory": {},\n  "byMainCode": {}\n}'; }
+    document.getElementById('ruleEditorModal')?.classList.add('show');
+}
+function closeRuleEditor() { document.getElementById('ruleEditorModal')?.classList.remove('show'); }
+async function saveRules() {
+    const txt = document.getElementById('ruleJson').value;
+    try { JSON.parse(txt); } catch (e) { alert('JSON 格式错误：' + e.message); return; }
+    try {
+        const resp = await fetch('/api/listing/accessory-rules', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: txt
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        closeRuleEditor();
+        alert('规则已保存');
+    } catch (e) { alert('保存失败：' + e.message); }
+}
 
 // ── 防比价模板 ──
 let siTemplates = [];  // [{id,name,type,hasPortrait,prompt}]
@@ -705,10 +759,158 @@ function siApply() {
     });
     lstRenderSkuList();
     closeSkuImgModal();
+    // 全自动模式：采用图后人工已确认，直接连上架
+    if (lyGetSettings().mode === 'auto') {
+        if (confirm(`已采用 ${applied} 张 SKU 图。全自动模式将直接上架，确认继续？`)) {
+            lstStartListing(false);
+        }
+        return;
+    }
     alert(`已采用 ${applied} 张 SKU 图`);
 }
 
+// ── 全自动上新：只选主件 → 规则补配件 → 成本/定价/标题 → 打开生图并自动开始 ──
+async function lyAutoRun() {
+    try {
+        if (!lstCatPath.length) { alert('全自动需先选好商品品类'); return; }
+        if (!document.getElementById('lstBrand').value.trim()) { alert('请先填写品牌（必填）'); return; }
+        if (!document.getElementById('lstMainImgDir').value.trim()) { alert('请先导入商品图片文件夹（需含主图，用作生图参考）'); return; }
+        const category = lstCatPath.join(' > ');
+        const mainCode = erpSelectedSkus[0]?.itemCode || '';
+        // 1) 规则解析：补配件/批量件 + 阶梯
+        const erpSkus = (window._erpAllSkuRowsFull || []).map(r => ({ itemCode: r.skuOuterId, name: r.name }));
+        const rresp = await fetch('/api/listing/auto-resolve', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, mainItemCode: mainCode, erpSkus })
+        });
+        const rule = await rresp.json();
+        if (rule.error) throw new Error(rule.error);
+        const ladders = rule.ladders || [];
+        const accSkus = rule.accSkus || [];
+        if (!ladders.length) {
+            alert('该品类规则库未定义阶梯型号，请在「⚙️设置→编辑规则库」补充，或改用人工模式。');
+            return;
+        }
+        // 2) 按阶梯为每个选中主件构造 SKU（itemCode=主件码+配件码，accParts 带数量）
+        const accByKw = {};
+        accSkus.forEach(a => { accByKw[a.keyword] = a; });
+        // 成本/重量查表（来自 ERP 单品行）
+        const costMap = {};
+        (window._erpAllSkuRowsFull || []).forEach(r => {
+            costMap[r.skuOuterId] = { cost: parseFloat(r.purchasePrice) || 0, weight: parseFloat(r.weight) || 0 };
+        });
+        const items = [];
+        const cells = [];  // 供 calc-combo-cost
+        erpSelectedSkus.forEach(main => {
+            const mc = costMap[main.itemCode] || { cost: 0, weight: 0 };
+            ladders.forEach(ld => {
+                const parts = (ld.components || []).map(c => {
+                    const a = accByKw[c.match]; if (!a) return null;
+                    return { code: a.itemCode, qty: c.qty || a.defaultQty || 1 };
+                }).filter(Boolean);
+                const codeStr = [main.itemCode].concat(parts.map(p => p.qty > 1 ? `${p.code}*${p.qty}` : p.code)).join('+');
+                items.push({
+                    name: `${main.productName || main.itemCode} ${ld.name}`.trim(),
+                    spec1: main.productName || main.itemCode, spec2: ld.name,
+                    itemCode: codeStr, accParts: parts, stock: 8888, groupPrice: 0, singlePrice: 0, imgDir: ''
+                });
+                // 组件清单（主件+配件）供成本计算
+                const comps = [{ itemCode: main.itemCode, qty: 1, cost: mc.cost, weight: mc.weight }]
+                    .concat(parts.map(p => {
+                        const pc = costMap[p.code] || { cost: 0, weight: 0 };
+                        return { itemCode: p.code, qty: p.qty, cost: pc.cost, weight: pc.weight };
+                    }));
+                cells.push({ name: `${main.productName||main.itemCode} ${ld.name}`.trim(), components: comps, stock: 8888 });
+            });
+        });
+        // 2.5) 成本 + 定价（复用现有端点）
+        try {
+            const ccResp = await fetch('/api/erp/calc-combo-cost', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productType: lstCatPath[lstCatPath.length - 1] || '', fixedAccessories: [], skus: cells })
+            });
+            const ccData = await ccResp.json();
+            const costedSkus = (ccData.skus || []).map((s, i) => ({ itemCode: items[i]?.itemCode || '', name: items[i]?.name || '', cost: s.cost || 0, stock: 8888 }));
+            const prResp = await fetch('/api/pricing/calculate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ costRatio: 0.35, skus: costedSkus })
+            });
+            const prData = await prResp.json();
+            (prData.skus || []).forEach((s, i) => {
+                if (items[i]) { items[i].groupPrice = s.pinPrice || 0; items[i].singlePrice = prData.singlePrice || 0; items[i].cost = s.cost || 0; }
+            });
+        } catch (e) { console.warn('全自动定价失败，价格留 0 待人工填', e); }
+        lstSkuItems = items;
+        lstRenderSkuList();
+        // 2.6) SKU 生成后，把已导入的白底图目录自动匹配到各 SKU（供生图贴图用）
+        const whiteDir = document.getElementById('lstWhiteImgDir')?.value.trim();
+        if (whiteDir) { try { await lstAutoMatchWhite(whiteDir); } catch (_) {} }
+        // 3) 标题自动生成（复用 prepare）
+        try {
+            const brand = document.getElementById('lstBrand')?.value.trim() || '';
+            const material = document.getElementById('lstMaterial')?.value.trim() || '';
+            const pResp = await fetch('/api/listing/prepare', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category, material, brand, skuNames: items.map(i => i.spec2) })
+            });
+            const pdata = await pResp.json();
+            if (pdata.title) document.getElementById('lstTitle').value = pdata.title;
+            if (pdata.skuNames) items.forEach(i => { if (pdata.skuNames[i.name]) i.skuDisplayName = pdata.skuNames[i.name]; });
+        } catch (e) { console.warn('标题自动生成失败', e); }
+        // 4) 打开生图弹窗并自动开始（生图→停在待确认，确认后自动上架见 siApply）
+        document.getElementById('lstPreview').style.display = 'block';
+        await openSkuImgModal();
+        // 自动选第一张主图作参考并开始
+        const firstRef = document.querySelector('#siRefThumbs img');
+        if (firstRef) { siChooseRef(firstRef); }
+        if (document.getElementById('siRefPath').value) {
+            siGenerate();
+        } else {
+            alert('已自动搭配+定价完成，请在生图弹窗选参考主图后点「开始生成」。');
+        }
+    } catch (e) {
+        alert('全自动流程失败：' + e.message + '\n可改用人工模式逐步操作。');
+    }
+}
+
 // 白底图：选一个文件夹，按数字顺序逐个贴到 SKU 的 whiteImgDir
+// 把白底图目录里的图按颜色/编码自动匹配到各 SKU（供文件夹扫描 + 手动导入复用）。返回匹配数。
+async function lstAutoMatchWhite(dir) {
+    if (!dir || !lstSkuItems.length) return 0;
+    const resp = await fetch('/api/listing/list-images', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: dir })
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    const imgs = data.images || [];
+    if (!imgs.length) return 0;
+    // 配件/包装类文件不能当作主件白底图
+    const accRe = /软管|hose|滤芯|filter|底座|base|袋|bag|水质|对比|water/i;
+    const colorImgs = imgs.filter(p => !accRe.test(p.replace(/.*[\\/]/, '')));
+    const pool = colorImgs.length ? colorImgs : imgs;
+    const baseName = p => p.replace(/.*[\\/]/, '').replace(/\.[^.]+$/, '');
+    let n = 0, matched = 0;
+    lstSkuItems.forEach(s => {
+        const code = (s.itemCode || '').replace(/\s/g, '');
+        const spec = (s.spec1 || s.name || '').replace(/[【】\[\]\s]/g, '');
+        const hit = pool.find(p => {
+            const bn = baseName(p).replace(/\s/g, '');
+            if (!bn) return false;
+            return (code && code.includes(bn)) || (spec && spec.includes(bn));
+        });
+        if (hit) { s.whiteImgDir = hit; n++; matched++; }
+    });
+    let ri = 0;
+    lstSkuItems.forEach(s => {
+        if (s.whiteImgDir) return;
+        if (pool.length) { s.whiteImgDir = pool[ri % pool.length]; ri++; n++; }
+    });
+    lstRenderSkuList();
+    lstRenderImgPreview();
+    return n;
+}
+
 async function lstImportWhite() {
     if (!lstSkuItems.length) { alert('请先确认 SKU 布局'); return; }
     let dir = '';
@@ -720,42 +922,10 @@ async function lstImportWhite() {
     if (!dir) return;
     try {
         const wdInput = document.getElementById('lstWhiteImgDir');
-        if (wdInput) wdInput.value = dir;  // 记录白底图目录，供预览和参考图检索使用
-        const resp = await fetch('/api/listing/list-images', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ folderPath: dir })
-        });
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
-        const imgs = data.images || [];
-        if (!imgs.length) { alert('该文件夹未找到图片'); return; }
-        // 配件/包装类文件不能当作主件白底图（避免把"软管/滤芯/底座/袋子"配给某个颜色SKU）
-        const accRe = /软管|hose|滤芯|filter|底座|base|袋|bag|水质|对比|water/i;
-        const colorImgs = imgs.filter(p => !accRe.test(p.replace(/.*[\\/]/, '')));
-        const pool = colorImgs.length ? colorImgs : imgs;
-        const baseName = p => p.replace(/.*[\\/]/, '').replace(/\.[^.]+$/, '');
-        let n = 0, matched = 0;
-        // 匹配主件白底图：白底图可能按「编码」命名（如 GF-106-银色-1.png）或「颜色」命名（如 月光银.jpg）。
-        // 优先用 SKU 规格编码(itemCode，含主件码)匹配，命中不了再用营销款名(spec1)里的颜色匹配。同色/同主件多个 SKU 复用同一张（不去重）。
-        lstSkuItems.forEach(s => {
-            const code = (s.itemCode || '').replace(/\s/g, '');
-            const spec = (s.spec1 || s.name || '').replace(/[【】\[\]\s]/g, '');
-            const hit = pool.find(p => {
-                const bn = baseName(p).replace(/\s/g, '');
-                if (!bn) return false;
-                return (code && code.includes(bn)) || (spec && spec.includes(bn));
-            });
-            if (hit) { s.whiteImgDir = hit; n++; matched++; }
-        });
-        // 未命中颜色名的 SKU 按图片顺序兜底（循环取用，避免下标越界）
-        let ri = 0;
-        lstSkuItems.forEach(s => {
-            if (s.whiteImgDir) return;
-            if (pool.length) { s.whiteImgDir = pool[ri % pool.length]; ri++; n++; }
-        });
-        lstRenderSkuList();
-        lstRenderImgPreview();
-        alert(`已匹配 ${n}/${lstSkuItems.length} 张白底图（按颜色名命中 ${matched} 个，同色共用一张；其余按顺序兜底）`);
+        if (wdInput) wdInput.value = dir;
+        const n = await lstAutoMatchWhite(dir);
+        if (!n) { alert('该文件夹未找到可匹配图片'); return; }
+        alert(`已匹配 ${n}/${lstSkuItems.length} 张白底图（按颜色/编码匹配，同色共用一张，其余按顺序兜底）`);
     } catch (e) {
         alert('导入白底图失败：' + e.message);
     }
@@ -1179,11 +1349,6 @@ function lstApplyFolder(folderPath) {
 async function lstScanFolder(folderPath) {
     const status = document.getElementById('lstFolderStatus');
     status.style.display = 'block';
-    // SKU 数据来自 ERP+AI 流程，必须先完成搭配才能配图
-    if (!lstSkuItems.length) {
-        status.innerHTML = '⚠ 请先完成「ERP 选品 → AI 搭配 → 定价」，生成 SKU 后再导入图片文件夹';
-        return;
-    }
     status.textContent = '扫描中...';
     try {
         const resp = await fetch('/api/listing/scan-folder', {
@@ -1194,12 +1359,14 @@ async function lstScanFolder(folderPath) {
         if (data.error) throw new Error(data.error);
         document.getElementById('lstMainImgDir').value = data.mainImgDir || '';
         document.getElementById('lstDetailImgDir').value = data.detailImgDir || '';
+        document.getElementById('lstWhiteImgDir').value = data.whiteImgDir || '';
 
-        // SKU 图由「🎨生成SKU图」生成、白底图单独导入；此处只识别主图/详情图
+        // 白底图跟主图/详情图一起识别；白底图自动按颜色/编码匹配到各 SKU（不再单独导入）
         const lines = [];
         if (data.mainImgDir) lines.push(`✓ 主图：${data.mainImgDir}（用作生图参考）`); else lines.push('✗ 未找到主图文件夹（命名需含"主图"）');
         if (data.detailImgDir) lines.push(`✓ 详情图：${data.detailImgDir}`); else lines.push('✗ 未找到详情图文件夹（命名需含"详情"）');
-        lines.push('💡 SKU 图请点「🎨生成SKU图」生成，白底图点「⬜导入白底图」单独导入');
+        if (data.whiteImgDir) lines.push(`✓ 白底图：${data.whiteImgDir}（自动匹配 SKU）`); else lines.push('✗ 未找到白底图文件夹（命名需含"白底"）');
+        if (data.whiteImgDir) { try { await lstAutoMatchWhite(data.whiteImgDir); } catch (_) {} }
         status.innerHTML = lines.join('<br>');
         lstShowPreview();
         lstRenderImgPreview();
@@ -1351,13 +1518,13 @@ async function lstStartListing(dryRun) {
     }
     const categoryPath = lstCatPath.join(' > ');
     const productType = lstCatPath[lstCatPath.length - 1] || '';
-    const material = document.getElementById('lstMaterial').value.trim() || '碳钢';
+    const material = panelMaterialVal() || document.getElementById('lstMaterial').value.trim() || '塑料';
     const attributes = {};
     if (material) attributes['材质'] = material;
-    // 并入产品信息属性面板的非空项（材质已设则不覆盖）
+    // 并入产品信息属性面板的其余非空项（材质单独处理，避免重复）
     (lstAttributes || []).forEach(a => {
         const n = (a.name || '').trim(), v = (a.value || '').trim();
-        if (n && v && !(n === '材质' && attributes['材质'])) attributes[n] = v;
+        if (n && v && n !== '材质') attributes[n] = v;
     });
     const config = {
         productType, material,
@@ -1840,6 +2007,13 @@ function erpNext() { erpPage++; erpLoad(true); }
 
 async function erpConfirm() {
     if (!erpSelectedSkus.length) { alert('请先勾选单品'); return; }
+
+    // 全自动模式：只需选了主件，后端按规则补配件/批量件，自动跑到生图
+    if (lyGetSettings().mode === 'auto') {
+        closeErpModal();
+        lyAutoRun();
+        return;
+    }
 
     closeErpModal();
 

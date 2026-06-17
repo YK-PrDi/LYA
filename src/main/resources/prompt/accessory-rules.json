@@ -1,0 +1,18 @@
+{
+  "byCategory": {
+    "花洒喷头": {
+      "accessories": [
+        { "keyword": "软管", "role": "accessory", "defaultQty": 1 },
+        { "keyword": "底座", "role": "accessory", "defaultQty": 1 },
+        { "keyword": "滤芯", "role": "batch", "defaultQty": 5 }
+      ],
+      "ladders": [
+        { "name": "增压亲肤单喷头", "components": [] },
+        { "name": "喷头+1.5米防爆软管", "components": [{ "match": "软管", "qty": 1 }] },
+        { "name": "喷头+稳固银底座", "components": [{ "match": "底座", "qty": 1 }] },
+        { "name": "全配+5支过滤滤芯", "components": [{ "match": "滤芯", "qty": 5 }] }
+      ]
+    }
+  },
+  "byMainCode": {}
+}
