@@ -31,9 +31,19 @@ app:
 
   gpt-image:
     provider: "${IMG_PROVIDER:gemini}"
+    # Gemini → https://generativelanguage.googleapis.com, model: gemini-3-pro-image
+    # gpt-image-1 → https://api.linapi.net, model: gpt-image-1
     base-url: "${IMG_BASE_URL:https://generativelanguage.googleapis.com}"
-    model: "${IMG_MODEL:gemini-2.5-flash-image}"
+    model: "${IMG_MODEL:gemini-3-pro-image}"
     keys: "${IMG_KEYS:}"
+    api-keys:
+      - "${GPT_IMAGE_KEY_1:}"
+      - "${GPT_IMAGE_KEY_2:}"
+      - "${GPT_IMAGE_KEY_3:}"
+      - "${GPT_IMAGE_KEY_4:}"
+    # Gemini 生图质量参数（仅 gemini 路径生效，需用 proto 枚举名）
+    aspect-ratio: "${IMG_ASPECT_RATIO:ASPECT_RATIO_ONE_BY_ONE}"
+    image-size: "${IMG_SIZE:IMAGE_SIZE_ONE_K}"
     proxy-host: "${IMG_PROXY_HOST:}"
     proxy-port: "${IMG_PROXY_PORT:0}"
 

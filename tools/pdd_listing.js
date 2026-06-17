@@ -774,32 +774,34 @@ async function main() {
                 if (!skuFile) continue;
 
                 const key = sku.name.replace(/\s+/g, '');
-                // 在浏览器内：按"行内只含本 SKU 名"找到该行，scrollIntoView 触发渲染，
-                // 并给其 file input 打 data-upload-target 标记返回是否找到。
-                const found = await page.evaluate((args) => {
+                // 直接返回目标行的 file input 句柄（同一次 evaluate 内定位+滚动+取句柄），
+                // 避免"先标记再重新查询"之间虚拟滚动重排导致标记元素失效/错位。
+                // 同时排除"批量设置"行——它也有 file input，误传会把图灌进批量槽污染所有 SKU。
+                const handle = await page.evaluateHandle((args) => {
                     const { target, allNames } = args;
                     const section = document.getElementById('goods-spec-sku');
-                    if (!section) return false;
-                    // 先清旧标记
-                    section.querySelectorAll('[data-upload-target]').forEach(el => el.removeAttribute('data-upload-target'));
+                    if (!section) return null;
                     const rows = section.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"]');
                     for (const row of rows) {
                         const txt = row.textContent.replace(/\s+/g, '');
+                        // 跳过批量设置行
+                        if (txt.includes('批量') || txt.includes('批量设置')) continue;
                         if (!txt.includes(target)) continue;
-                        if (allNames.filter(n => n && txt.includes(n)).length !== 1) continue; // 排除批量大容器
+                        // 行内可能命中多个 SKU 名（一个名是另一个子串）；只接受 target 是最长（最具体）的那个
+                        const matched = allNames.filter(n => n && txt.includes(n));
+                        const longest = matched.reduce((a, b) => (b.length > a.length ? b : a), '');
+                        if (longest !== target) continue;
                         const inp = row.querySelector('input[type="file"]');
                         if (!inp) continue;
                         row.scrollIntoView({ block: 'center' });
-                        inp.setAttribute('data-upload-target', '1');
-                        return true;
+                        return inp;
                     }
-                    return false;
+                    return null;
                 }, { target: key, allNames: allSkuNames });
 
-                if (!found) { log(`SKU[${i}] (${sku.name}) 滚动后仍找不到对应行，跳过`); skippedNoImg.push(i + 1); continue; }
-                await page.waitForTimeout(400);
-                const inp = await page.$('#goods-spec-sku input[type="file"][data-upload-target="1"]');
-                if (!inp) { log(`SKU[${i}] 标记后找不到 file input，跳过`); skippedNoImg.push(i + 1); continue; }
+                const inp = handle && handle.asElement ? handle.asElement() : null;
+                if (!inp) { log(`SKU[${i}] (${sku.name}) 滚动后仍找不到对应行，跳过`); skippedNoImg.push(i + 1); continue; }
+                await page.waitForTimeout(300);
                 await inp.setInputFiles(skuFile);
                 await page.waitForFunction(() => !document.querySelector('.init-loading, [class*="init-loading"]'), { timeout: 8000 }).catch(() => {});
                 await humanDelay(800, 1200);
@@ -826,8 +828,12 @@ async function main() {
                             for (const el of section.querySelectorAll('input[type="file"]')) {
                                 const row = el.closest('tr, [class*="row"], [class*="Row"], [class*="item"]');
                                 const txt = row ? row.textContent.replace(/\s+/g, '') : '';
+                                if (txt.includes('批量') || txt.includes('批量设置')) continue; // 排除批量设置行
                                 if (!txt.includes(target)) continue;
-                                if (allNames.filter(n => txt.includes(n)).length === 1) return el;
+                                // 同上：只在 target 是该行命中的最长 SKU 名时才补传，避免短名误配长名行
+                                const matched = allNames.filter(n => n && txt.includes(n));
+                                const longest = matched.reduce((a, b) => (b.length > a.length ? b : a), '');
+                                if (longest === target) return el;
                             }
                             return null;
                         }, { target: sku.name.replace(/\s+/g, ''), allNames: allNames2 });
@@ -948,6 +954,31 @@ async function main() {
                 return { batchEls: batchEls.slice(0, 8), tables };
             });
             log(`批量入口诊断: ${JSON.stringify(batchDiag)}`);
+            // 批量设置行深度诊断：dump 批量行的输入框(placeholder/类型)和附近按钮(应用/确定)，
+            // 用于把"库存+单买价"改成批量填一次（全表统一值），减少逐行虚拟滚动操作。
+            const batchRowDiag = await page.evaluate(() => {
+                const section = document.getElementById('goods-spec-sku');
+                if (!section) return { error: 'no section' };
+                // 找含"批量/全部款式"且带输入框的行
+                const rows = [...section.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"]')];
+                const out = [];
+                for (const r of rows) {
+                    const t = r.textContent.replace(/\s+/g, '');
+                    if (!/批量|全部款式|一键/.test(t)) continue;
+                    const inputs = [...r.querySelectorAll('input')].map(el => ({
+                        ph: (el.placeholder || '').slice(0, 20),
+                        type: el.type, disabled: el.disabled,
+                        val: (el.value || '').slice(0, 10)
+                    }));
+                    const btns = [...r.querySelectorAll('button, [class*="btn"], [class*="Btn"], span')]
+                        .map(el => (el.textContent || '').trim()).filter(x => x && x.length <= 8 && /应用|确定|批量|设置|保存/.test(x));
+                    if (inputs.length || btns.length) {
+                        out.push({ txt: t.slice(0, 40), inputs, btns: [...new Set(btns)].slice(0, 6) });
+                    }
+                }
+                return { rows: out.slice(0, 6) };
+            });
+            log(`批量设置行深度诊断: ${JSON.stringify(batchRowDiag)}`);
             // 虚拟列表行结构诊断：看行靠什么标识真实行号（data-*/aria-rowindex/transform/top）
             const rowStructDiag = await page.evaluate(() => {
                 const section = document.getElementById('goods-spec-sku');
@@ -992,6 +1023,59 @@ async function main() {
 
             const maxGroupPrice = Math.max(...config.skus.map(s => s.groupPrice / 100));
             const batchSinglePrice = (maxGroupPrice + 1).toFixed(2);
+
+            // ── 批量设置：库存(8888)+单买价(全表统一) 一次填好，应用到所有 SKU ──
+            // 库存/单买价全表相同，用批量行填一次，省去逐行操作、减少虚拟滚动暴露。
+            // 逐行循环里这两列只在"该格仍为空"时兜底补填，所以批量失败也不会漏。
+            const batchStock = String(config.skus[0]?.stock || 8888);
+            try {
+                // 批量行：含"全部款式"、带 placeholder=库存/单买价 的输入框那一行
+                const filled = await page.evaluate((args) => {
+                    const { stock, single } = args;
+                    const section = document.getElementById('goods-spec-sku');
+                    if (!section) return false;
+                    const rows = [...section.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"]')];
+                    const setVal = (el, v) => {
+                        const proto = Object.getPrototypeOf(el);
+                        const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                        desc && desc.set ? desc.set.call(el, v) : (el.value = v);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    };
+                    for (const r of rows) {
+                        const t = r.textContent.replace(/\s+/g, '');
+                        if (!/全部款式/.test(t)) continue;
+                        const stockInp = r.querySelector('input[placeholder="库存"]');
+                        const singleInp = r.querySelector('input[placeholder="单买价"]');
+                        if (!stockInp && !singleInp) continue;
+                        if (stockInp) setVal(stockInp, stock);
+                        if (singleInp) setVal(singleInp, single);
+                        return true;
+                    }
+                    return false;
+                }, { stock: batchStock, single: batchSinglePrice });
+                if (filled) {
+                    // 点"批量设置"按钮应用到全表
+                    const applied = await page.evaluate(() => {
+                        const section = document.getElementById('goods-spec-sku');
+                        if (!section) return false;
+                        const rows = [...section.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"]')];
+                        for (const r of rows) {
+                            if (!/全部款式/.test(r.textContent.replace(/\s+/g, ''))) continue;
+                            const btn = [...r.querySelectorAll('button, [class*="btn"], [class*="Btn"], span, a')]
+                                .find(el => (el.textContent || '').trim() === '批量设置');
+                            if (btn) { btn.click(); return true; }
+                        }
+                        return false;
+                    });
+                    await page.waitForTimeout(600);
+                    log(`批量设置：库存=${batchStock} 单买价=${batchSinglePrice}，应用按钮=${applied ? '已点击' : '未找到'}`);
+                } else {
+                    log('批量设置行未找到库存/单买价输入框，改为逐行填写');
+                }
+            } catch (e) {
+                log('批量设置失败，改为逐行填写: ' + e.message.split('\n')[0]);
+            }
 
             // 价格表是虚拟滚动，不可靠 offsetTop 定位（行高不固定，第12行起易错位）。
             // 改用 SKU 名称文本匹配定位行——与 SKU 图上传阶段（第779行）同策略：
@@ -1096,18 +1180,22 @@ async function main() {
 
                 await page.waitForTimeout(150);
 
-                const fillCell = async (c, value) => {
+                const fillCell = async (c, value, onlyIfEmpty) => {
                     if (value === undefined || value === null || value === '') return;
                     const el = await page.$(`#goods-spec-sku input[data-pcell="${c}"]`);
                     if (!el) { log(`  列${c}找不到输入框`); return; }
+                    if (onlyIfEmpty) {
+                        const cur = (await el.inputValue().catch(() => '')).trim();
+                        if (cur) return;  // 批量设置已填，跳过
+                    }
                     await el.scrollIntoViewIfNeeded().catch(() => {});
                     await humanType(page, el, String(value));
                     await humanDelay(150, 300);
                 };
-                await fillCell(0, String(sku.stock || 8888));      // 库存（使用配置值，不再硬编码）
-                await fillCell(1, groupPriceYuan.toFixed(2));       // 拼单价
-                await fillCell(2, batchSinglePrice);                // 单买价
-                if (sku.itemCode) await fillCell(3, sku.itemCode);  // 规格编码
+                await fillCell(0, batchStock, true);                // 库存：批量已填则跳过，否则兜底
+                await fillCell(1, groupPriceYuan.toFixed(2));        // 拼单价：每行不同，必填
+                await fillCell(2, batchSinglePrice, true);          // 单买价：批量已填则跳过，否则兜底
+                if (sku.itemCode) await fillCell(3, sku.itemCode);  // 规格编码：每行不同，必填
                 await humanDelay(300, 600);
             }
 

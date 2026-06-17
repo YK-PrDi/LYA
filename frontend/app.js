@@ -311,6 +311,7 @@ async function openSkuImgModal() {
     siGenImages = [];
     document.getElementById('siContent').innerHTML = '<div style="text-align:center;padding:30px 0;color:var(--text-dim);font-size:0.82rem;">选好参考图后点「开始生成」</div>';
     document.getElementById('skuImgModal')?.classList.add('show');
+    siLoadTemplates();  // 加载防比价模板到下拉
 
     thumbs.innerHTML = '<span style="font-size:0.72rem;color:var(--text-dim);">加载主图中...</span>';
     let imgs = [];
@@ -338,6 +339,98 @@ async function openSkuImgModal() {
 
 function closeSkuImgModal() { document.getElementById('skuImgModal')?.classList.remove('show'); }
 
+// ── 防比价模板 ──
+let siTemplates = [];  // [{id,name,type,hasPortrait,prompt}]
+
+async function siLoadTemplates() {
+    try {
+        const resp = await fetch('/api/listing/antiprice-templates');
+        const data = await resp.json();
+        siTemplates = (data && data.templates) || [];
+    } catch (_) { siTemplates = []; }
+    siRenderTemplateOptions();
+}
+
+// 按"排除人像"过滤后的可用模板
+function siAvailableTemplates() {
+    const exP = document.getElementById('siExcludePortrait')?.checked;
+    return siTemplates.filter(t => !(exP && t.hasPortrait));
+}
+
+function siRenderTemplateOptions() {
+    const box = document.getElementById('siTemplateOptions');
+    if (!box) return;
+    const opts = ['<div class="gf-option" data-value="" onclick="selectOption(this,event)">🎲 随机一种</div>']
+        .concat(siAvailableTemplates().map(t =>
+            `<div class="gf-option" data-value="${ecEscAttr(t.id)}" onclick="selectOption(this,event)">${ecEscAttr(t.name)}${t.type==='sticker'?'（贴图）':''}</div>`));
+    box.innerHTML = opts.join('');
+    // 当前选中若已被过滤掉则重置为随机
+    const cur = document.getElementById('siTemplate').value;
+    if (cur && !siAvailableTemplates().some(t => t.id === cur)) {
+        document.getElementById('siTemplate').value = '';
+        document.getElementById('siTemplateText').textContent = '🎲 随机一种';
+    }
+}
+
+// 排除人像勾选变化时刷新下拉
+document.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'siExcludePortrait') siRenderTemplateOptions();
+});
+
+// 整批确定一个 templateId：手选则用所选；选"随机"则从可用模板里随机抽一个
+function siPickBatchTemplate() {
+    const chosen = document.getElementById('siTemplate')?.value || '';
+    if (chosen) return chosen;
+    const pool = siAvailableTemplates();
+    if (!pool.length) return '';
+    return pool[Math.floor(Math.random() * pool.length)].id;
+}
+
+// ── 模板编辑弹窗 ──
+function openTplEditor() {
+    tplRenderList(siTemplates);
+    document.getElementById('tplEditorModal')?.classList.add('show');
+}
+function closeTplEditor() { document.getElementById('tplEditorModal')?.classList.remove('show'); }
+
+function tplRenderList(list) {
+    const box = document.getElementById('tplList');
+    if (!box) return;
+    box.innerHTML = (list || []).map((t, i) => `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input value="${ecEscAttr(t.name||'')}" oninput="siTemplates[${i}].name=this.value" placeholder="模板名" style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.76rem;">
+                <select onchange="siTemplates[${i}].type=this.value" style="padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:0.72rem;">
+                    <option value="ai"${t.type==='ai'?' selected':''}>纯AI</option>
+                    <option value="sticker"${t.type==='sticker'?' selected':''}>贴图</option>
+                </select>
+                <label style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:3px;"><input type="checkbox" ${t.hasPortrait?'checked':''} onchange="siTemplates[${i}].hasPortrait=this.checked"> 人像</label>
+                <button onclick="tplDel(${i})" style="font-size:0.66rem;padding:2px 8px;border:1px solid #ef4444;border-radius:5px;background:transparent;color:#ef4444;cursor:pointer;">删</button>
+            </div>
+            <textarea oninput="siTemplates[${i}].prompt=this.value" placeholder="${t.type==='sticker'?'贴图模板无需提示词':'提示词，可用 {{colorName}} {{bgStyle}}'}" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.73rem;resize:vertical;">${ecEscAttr(t.prompt||'')}</textarea>
+        </div>`).join('') || '<div style="color:var(--text-dim);font-size:0.78rem;text-align:center;padding:20px;">暂无模板，点下方新增</div>';
+}
+
+function tplAdd() {
+    siTemplates.push({ id: 't' + Date.now(), name: '新模板', type: 'ai', hasPortrait: false, prompt: '' });
+    tplRenderList(siTemplates);
+}
+function tplDel(i) { siTemplates.splice(i, 1); tplRenderList(siTemplates); }
+
+async function tplSave() {
+    try {
+        const resp = await fetch('/api/listing/antiprice-templates', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templates: siTemplates })
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        siRenderTemplateOptions();
+        closeTplEditor();
+        alert('模板已保存');
+    } catch (e) { alert('保存失败：' + e.message); }
+}
+
 // 点选缩略图作参考
 function siChooseRef(el) {
     document.querySelectorAll('#siRefThumbs img').forEach(i => i.style.borderColor = 'transparent');
@@ -360,27 +453,105 @@ async function siGenerate() {
     const productType = (lstCatPath[lstCatPath.length - 1] || '');
     btn.disabled = true;
     const box = document.getElementById('siContent');
-    box.innerHTML = '<div style="text-align:center;padding:30px 0;color:var(--text-dim);font-size:0.82rem;">⏳ 生成中，每张约需 1-3 分钟，请耐心等待…</div>';
     try {
+        // 共享参考图只取一次（袋子/配件/水质对比）
         const bagImagePath = await siFindBagImage(productType);
-        const resp = await fetch('/api/listing/gen-sku-images', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                refImagePath: ref,
-                productType,
-                bagImagePath,
-                skus: lstSkuItems.map((s, i) => ({ idx: i, name: siSkuFullName(s), compDesc: siSkuFullName(s) }))
-            })
-        });
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
-        siGenImages = data.images || [];
+        const accImagePaths = await siFindAccessoryImages(productType);
+        const waterImagePath = await siFindWaterImage(productType);
+        // 整批背景只分析一次，分发给每个并发 SKU，保证背景一致（并发下各请求不再各自分析）
+        let bgStyle = '';
+        try {
+            const bgResp = await fetch('/api/listing/analyze-bg', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refImagePath: ref })
+            });
+            bgStyle = (await bgResp.json()).bgStyle || '';
+        } catch (_) {}
+
+        // 整批确定一个防比价模板（手选或随机），所有 SKU 用同一个
+        const templateId = siPickBatchTemplate();
+        const tplName = templateId ? (siTemplates.find(t => t.id === templateId)?.name || templateId) : '';
+
+        // 初始化所有格子为"生成中"，并渲染进度条 + 网格
+        siGenImages = lstSkuItems.map((s, i) => ({ idx: i, name: siSkuFullName(s), loading: true }));
+        const total = siGenImages.length;
         siRenderResult();
+        siRenderProgress(0, total, tplName);
+
+        // 单个 SKU 生图请求（失败自动重试：429/网络抖动/后端报错都重试，指数退避）
+        const RETRY = 3;  // 总尝试次数 = 1 + (RETRY-1) 次重试
+        const genOne = async (i) => {
+            const s = lstSkuItems[i];
+            const reqBody = JSON.stringify({
+                refImagePath: ref, productType, bagImagePath, accImagePaths, waterImagePath, bgStyle, templateId,
+                skus: [{ idx: i, name: siSkuFullName(s), compDesc: siSkuFullName(s), itemCode: s.itemCode || '', accParts: s.accParts || [], whiteImgPath: s.whiteImgDir || '' }]
+            });
+            let lastErr = '失败';
+            for (let attempt = 1; attempt <= RETRY; attempt++) {
+                try {
+                    const resp = await fetch('/api/listing/gen-sku-images', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reqBody
+                    });
+                    const data = await resp.json();
+                    const one = (data.images || [])[0];
+                    if (one && one.path) {  // 真正成功
+                        const pos = siGenImages.findIndex(im => im.idx === i);
+                        if (pos >= 0) siGenImages[pos] = one;
+                        siRefreshCell(i);
+                        return;
+                    }
+                    lastErr = (one && one.error) || data.error || '生成失败';
+                } catch (e) {
+                    lastErr = e.message;
+                }
+                if (attempt < RETRY) {
+                    // 退避：1s、2s…（避开瞬时 429/抖动），并在格子上提示重试中
+                    const pos = siGenImages.findIndex(im => im.idx === i);
+                    if (pos >= 0) { siGenImages[pos].loading = true; siGenImages[pos].error = ''; }
+                    siRefreshCell(i);
+                    await new Promise(r => setTimeout(r, attempt * 1000));
+                }
+            }
+            // 多次仍失败：标记错误
+            const pos = siGenImages.findIndex(im => im.idx === i);
+            if (pos >= 0) { siGenImages[pos].loading = false; siGenImages[pos].error = lastErr; }
+            siRefreshCell(i);
+        };
+
+        // 并发池：同时最多 CONC 张，每完成一张更新进度条（既提速又有实时进度）
+        // Tier 1 下 Nano Banana Pro RPM=20，6 并发稳妥（留余量防偶发 429）；要更快可调 8。
+        const CONC = 6;
+        let next = 0, done = 0;
+        await Promise.all(Array.from({ length: Math.min(CONC, total) }, async () => {
+            while (next < total) {
+                const cur = next++;
+                await genOne(cur);
+                done++;
+                siRenderProgress(done, total, tplName);
+            }
+        }));
+        siRenderProgress(total, total, tplName);
     } catch (e) {
         box.innerHTML = `<div style="color:#dc2626;padding:20px;font-size:0.82rem;">生成失败：${ecEscAttr(e.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
+}
+
+// 生图进度条（渲染在网格上方）
+function siRenderProgress(done, total, tplName) {
+    const el = document.getElementById('siProgress');
+    if (!el) return;
+    const pct = total ? Math.round(done / total * 100) : 0;
+    const tpl = tplName ? `　构图：${ecEscAttr(tplName)}` : '';
+    el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim);margin-bottom:4px;">
+            <span>生成中… ${done}/${total}（并发加速，每张约 1-3 分钟）${tpl}</span><span>${pct}%</span>
+        </div>
+        <div style="height:8px;background:var(--surface-alt);border-radius:5px;overflow:hidden;">
+            <div style="height:100%;width:${pct}%;background:var(--primary);transition:width .3s;"></div>
+        </div>`;
+    el.style.display = done >= total ? 'none' : '';
 }
 
 // 花洒品类：从白底图目录里自动找文件名含"袋"的图作包装袋参考图；非花洒或找不到返回空
@@ -401,6 +572,49 @@ async function siFindBagImage(productType) {
     } catch (_) { return ''; }
 }
 
+// 花洒品类：配件候选白底图＝目录内所有图，排除（袋子/水质对比/已用作主件白底图的颜色图）。
+// 不再靠中文关键字预筛，交给后端按 SKU 规格编码里的配件码精确匹配（兼容纯编码文件名）。
+async function siFindAccessoryImages(productType) {
+    if (!(productType && (productType.includes('花洒') || productType.includes('淋浴')))) return [];
+    const whiteDir = document.getElementById('lstWhiteImgDir')?.value
+        || (lstSkuItems.find(s => s.whiteImgDir) ? lstSkuItems.find(s => s.whiteImgDir).whiteImgDir.replace(/[\\/][^\\/]+$/, '') : '');
+    if (!whiteDir) return [];
+    try {
+        const resp = await fetch('/api/listing/list-images', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folderPath: whiteDir })
+        });
+        const data = await resp.json();
+        const imgs = data.images || [];
+        const bagWaterRe = /袋|bag|水质|对比|water/i;
+        const usedMains = new Set(lstSkuItems.map(s => s.whiteImgDir).filter(Boolean));
+        return imgs.filter(p => !bagWaterRe.test(p.replace(/.*[\\/]/, '')) && !usedMains.has(p));
+    } catch (_) { return []; }
+}
+
+// 花洒品类：找水质对比参考图（白底图目录或其父目录里文件名含「水质/对比/water」），找不到返回空
+async function siFindWaterImage(productType) {
+    if (!(productType && (productType.includes('花洒') || productType.includes('淋浴')))) return '';
+    const whiteDir = document.getElementById('lstWhiteImgDir')?.value
+        || (lstSkuItems.find(s => s.whiteImgDir) ? lstSkuItems.find(s => s.whiteImgDir).whiteImgDir.replace(/[\\/][^\\/]+$/, '') : '');
+    if (!whiteDir) return '';
+    const parent = whiteDir.replace(/[\\/][^\\/]+$/, '');
+    const re = /水质|对比|water/i;
+    for (const dir of [whiteDir, parent]) {
+        if (!dir) continue;
+        try {
+            const resp = await fetch('/api/listing/list-images', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folderPath: dir })
+            });
+            const data = await resp.json();
+            const hit = (data.images || []).find(p => re.test(p.replace(/.*[\\/]/, '')));
+            if (hit) return hit;
+        } catch (_) {}
+    }
+    return '';
+}
+
 // SKU 完整描述：主件颜色(spec1) + 型号(spec2)，回退到款式名
 function siSkuFullName(s) {
     const parts = [];
@@ -412,7 +626,8 @@ function siSkuFullName(s) {
 
 function siRenderResult() {
     const box = document.getElementById('siContent');
-    box.innerHTML = `<div id="siGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">
+    box.innerHTML = `<div id="siProgress" style="margin-bottom:12px;display:none;"></div>
+    <div id="siGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">
         ${siGenImages.map(im => siCellHtml(im)).join('')}
     </div>
     <div style="margin-top:12px;text-align:right;">
@@ -449,11 +664,21 @@ async function siRegenOne(idx) {
     siRefreshCell(idx);
     try {
         const bagImagePath = await siFindBagImage(productType);
+        const accImagePaths = await siFindAccessoryImages(productType);
+        const waterImagePath = await siFindWaterImage(productType);
+        let bgStyle = '';
+        try {
+            const bgResp = await fetch('/api/listing/analyze-bg', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refImagePath: ref })
+            });
+            bgStyle = (await bgResp.json()).bgStyle || '';
+        } catch (_) {}
         const resp = await fetch('/api/listing/gen-sku-images', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                refImagePath: ref, productType, bagImagePath,
-                skus: [{ idx, name: siSkuFullName(s), compDesc: siSkuFullName(s) }]
+                refImagePath: ref, productType, bagImagePath, accImagePaths, waterImagePath, bgStyle, templateId: siPickBatchTemplate(),
+                skus: [{ idx, name: siSkuFullName(s), compDesc: siSkuFullName(s), itemCode: s.itemCode || '', accParts: s.accParts || [], whiteImgPath: s.whiteImgDir || '' }]
             })
         });
         const data = await resp.json();
@@ -494,6 +719,8 @@ async function lstImportWhite() {
     }
     if (!dir) return;
     try {
+        const wdInput = document.getElementById('lstWhiteImgDir');
+        if (wdInput) wdInput.value = dir;  // 记录白底图目录，供预览和参考图检索使用
         const resp = await fetch('/api/listing/list-images', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ folderPath: dir })
@@ -502,10 +729,33 @@ async function lstImportWhite() {
         if (data.error) throw new Error(data.error);
         const imgs = data.images || [];
         if (!imgs.length) { alert('该文件夹未找到图片'); return; }
-        let n = 0;
-        lstSkuItems.forEach((s, i) => { if (imgs[i]) { s.whiteImgDir = imgs[i]; n++; } });
+        // 配件/包装类文件不能当作主件白底图（避免把"软管/滤芯/底座/袋子"配给某个颜色SKU）
+        const accRe = /软管|hose|滤芯|filter|底座|base|袋|bag|水质|对比|water/i;
+        const colorImgs = imgs.filter(p => !accRe.test(p.replace(/.*[\\/]/, '')));
+        const pool = colorImgs.length ? colorImgs : imgs;
+        const baseName = p => p.replace(/.*[\\/]/, '').replace(/\.[^.]+$/, '');
+        let n = 0, matched = 0;
+        // 匹配主件白底图：白底图可能按「编码」命名（如 GF-106-银色-1.png）或「颜色」命名（如 月光银.jpg）。
+        // 优先用 SKU 规格编码(itemCode，含主件码)匹配，命中不了再用营销款名(spec1)里的颜色匹配。同色/同主件多个 SKU 复用同一张（不去重）。
+        lstSkuItems.forEach(s => {
+            const code = (s.itemCode || '').replace(/\s/g, '');
+            const spec = (s.spec1 || s.name || '').replace(/[【】\[\]\s]/g, '');
+            const hit = pool.find(p => {
+                const bn = baseName(p).replace(/\s/g, '');
+                if (!bn) return false;
+                return (code && code.includes(bn)) || (spec && spec.includes(bn));
+            });
+            if (hit) { s.whiteImgDir = hit; n++; matched++; }
+        });
+        // 未命中颜色名的 SKU 按图片顺序兜底（循环取用，避免下标越界）
+        let ri = 0;
+        lstSkuItems.forEach(s => {
+            if (s.whiteImgDir) return;
+            if (pool.length) { s.whiteImgDir = pool[ri % pool.length]; ri++; n++; }
+        });
         lstRenderSkuList();
-        alert(`已按顺序匹配 ${n}/${lstSkuItems.length} 张白底图`);
+        lstRenderImgPreview();
+        alert(`已匹配 ${n}/${lstSkuItems.length} 张白底图（按颜色名命中 ${matched} 个，同色共用一张；其余按顺序兜底）`);
     } catch (e) {
         alert('导入白底图失败：' + e.message);
     }
@@ -623,7 +873,9 @@ async function spGenerate() {
     btn.textContent = '⏳ 生成中...';
     btn.disabled = true;
     spStartProgress();
-    const planCount = parseInt(document.querySelector('input[name="spCount"]:checked')?.value || '3');
+    let planCount = parseInt(document.getElementById('spCount')?.value || '3');
+    if (!(planCount >= 1)) planCount = 3;       // 非法/空值兜底为 3
+    if (planCount > 20) planCount = 20;         // 上限保护，与输入框 max 一致
     // 只把非固定成本项（主件/配件）传给 AI，固定成本项（包材/纸箱）不参与搭配
     const skuPayload = lstSkuItems.filter(s => !s.isFixed)
         .map(s => ({ itemCode: s.itemCode || s.name, name: s.name || s.itemCode, cost: parseFloat(s.cost) || 0, role: s.role || 'main' }));
@@ -831,11 +1083,22 @@ async function spConfirm() {
         const cells = [];
         plan.mainItems.forEach(m => {
             plan.models.forEach(md => {
+                // 规格编码 = 主件编码 + 各配件编码，用 + 连接；数量>1 的配件（如滤芯）用「码*数量」后缀，
+                // 与快麦组合装格式一致，如 GF-099不开窗-灰色+银底座+银色1.5米软管+052滤芯*5
+                const codeParts = [m.itemCode];
+                (md.components || []).forEach(c => {
+                    const code = c.itemCode;
+                    if (!code) return;
+                    const n = Math.max(1, parseInt(c.qty) || 1);
+                    codeParts.push(n > 1 ? `${code}*${n}` : code);
+                });
+                const specCode = codeParts.filter(Boolean).join('+');
                 cells.push({
+                    itemCode: specCode,
                     spec1: m.specName || m.itemCode,
                     spec2: md.specName || '默认',
                     name: `${m.specName||m.itemCode} ${md.specName||''}`.trim(),
-                    stock: 999,
+                    stock: 8888,
                     components: cellComp(m.itemCode, md)
                 });
             });
@@ -847,10 +1110,13 @@ async function spConfirm() {
         });
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
-        // 展平后的格子列表进定价面板（带 spec1/spec2）
+        // 展平后的格子列表进定价面板（带 spec1/spec2 + 组合规格编码 + 已选配件码）
         openPricingModal((data.skus || []).map((s, i) => ({
-            name: s.name, cost: parseFloat(s.cost) || 0, stock: s.stock || 999,
-            spec1: cells[i]?.spec1 || '', spec2: cells[i]?.spec2 || ''
+            name: s.name, cost: parseFloat(s.cost) || 0, stock: s.stock || 8888,
+            itemCode: cells[i]?.itemCode || '',
+            spec1: cells[i]?.spec1 || '', spec2: cells[i]?.spec2 || '',
+            // 配件码清单（来自前面选的型号 components，去掉主件；保留 code+qty 供生图贴图用）
+            accParts: ((cells[i]?.components) || []).slice(1).map(c => ({ code: c.itemCode, qty: c.qty || 1 }))
         })));
         closeSkuPlanModal();
     } catch (e) {
@@ -936,9 +1202,48 @@ async function lstScanFolder(folderPath) {
         lines.push('💡 SKU 图请点「🎨生成SKU图」生成，白底图点「⬜导入白底图」单独导入');
         status.innerHTML = lines.join('<br>');
         lstShowPreview();
+        lstRenderImgPreview();
     } catch (e) {
         status.textContent = '扫描失败：' + e.message;
     }
+}
+
+// 左侧图片预览：主图/详情图/白底图各取目录图片显示缩略图
+async function lstRenderImgPreview() {
+    const box = document.getElementById('lstImgPreview');
+    if (!box) return;
+    const groups = [
+        { label: '主图',  dir: document.getElementById('lstMainImgDir')?.value || '' },
+        { label: '详情图', dir: document.getElementById('lstDetailImgDir')?.value || '' },
+        { label: '白底图', dir: document.getElementById('lstWhiteImgDir')?.value || '' },
+    ].filter(g => g.dir);
+    if (!groups.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-size:0.7rem;color:var(--text-dim);">加载预览…</div>';
+
+    const sections = await Promise.all(groups.map(async g => {
+        let imgs = [];
+        try {
+            const resp = await fetch('/api/listing/list-images', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folderPath: g.dir })
+            });
+            imgs = (await resp.json()).images || [];
+        } catch (_) {}
+        if (!imgs.length) return '';
+        const MAX = 12;
+        const thumbs = imgs.slice(0, MAX).map(p =>
+            `<img src="/api/image?path=${encodeURIComponent(p)}" title="${ecEscAttr(p.replace(/.*[\\/]/, ''))}"
+                style="width:48px;height:48px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0;">`
+        ).join('');
+        const more = imgs.length > MAX ? `<span style="font-size:0.66rem;color:var(--text-dim);align-self:center;">+${imgs.length - MAX}</span>` : '';
+        return `<div style="margin-bottom:8px;">
+            <div style="font-size:0.7rem;color:var(--text-dim);margin-bottom:4px;">${g.label}（${imgs.length}）</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;">${thumbs}${more}</div>
+        </div>`;
+    }));
+    const html = sections.filter(Boolean).join('');
+    box.innerHTML = html || '<div style="font-size:0.7rem;color:var(--text-dim);">无可预览图片</div>';
 }
 
 function lstShowPreview() {
@@ -1062,7 +1367,7 @@ async function lstStartListing(dryRun) {
             name: s.skuDisplayName || s.name, imgDir: s.imgDir,
             groupPrice: Math.round(Math.max(0, parseFloat(s.groupPrice) || 0) * 100),
             singlePrice: Math.round(Math.max(0, parseFloat(s.singlePrice) || 0) * 100),
-            stock: Math.max(0, parseInt(s.stock) || 999), itemCode: s.itemCode || ''
+            stock: Math.max(0, parseInt(s.stock) || 8888), itemCode: s.itemCode || ''
         })),
         mainImgDir: document.getElementById('lstMainImgDir').value.trim(),
         detailImgDir: document.getElementById('lstDetailImgDir').value.trim(),
@@ -1139,7 +1444,10 @@ function openPricingModal(skus) {
         name:     s.name || '',
         cost:     parseFloat(s.cost) || 0,
         imgDir:   imgMap[s.itemCode] || imgMap[s.name] || '',
-        stock:    parseInt(s.stock) || 999
+        stock:    parseInt(s.stock) || 8888,
+        spec1:    s.spec1 || '',
+        spec2:    s.spec2 || '',
+        accParts: s.accParts || []
     }));
     pmRatio = 0.35;
     const slider = document.getElementById('pmRatioSlider');
@@ -1251,8 +1559,11 @@ async function pmApply() {
         imgDir:      pmSkus[i]?.imgDir || '',
         groupPrice:  s.pinPrice || 0,
         singlePrice: data.singlePrice || 0,
-        stock:       pmSkus[i]?.stock || 999,
+        stock:       pmSkus[i]?.stock || 8888,
         itemCode:    s.itemCode || '',
+        spec1:       pmSkus[i]?.spec1 || '',
+        spec2:       pmSkus[i]?.spec2 || '',
+        accParts:    pmSkus[i]?.accParts || [],
         cost:        s.cost || 0
     }));
     lstRenderSkuList();
@@ -1266,6 +1577,26 @@ let erpPage = 1;
 let erpKeyword = '';
 let erpSelectedSkus = [];  // [{itemCode, productName}]
 let erpProductType = '架类';
+
+// ── 常用 SKU 计数器：选中即 +1，持久化到 localStorage，渲染时计数高的置顶 ──
+let erpUsage = {};  // { skuOuterId: 次数 }
+try { erpUsage = JSON.parse(localStorage.getItem('erpUsage') || '{}') || {}; } catch (_) { erpUsage = {}; }
+function erpSaveUsage() {
+    try { localStorage.setItem('erpUsage', JSON.stringify(erpUsage)); } catch (_) {}
+}
+function erpBumpUsage(code) {
+    if (!code) return;
+    erpUsage[code] = (erpUsage[code] || 0) + 1;
+    erpSaveUsage();
+}
+// 把行列表按常用计数降序置顶（计数相同/为0 保持原有相对顺序）
+function erpSortByUsage(rows) {
+    return rows.map((r, i) => [r, i]).sort((a, b) => {
+        const ua = erpUsage[a[0].skuOuterId] || 0, ub = erpUsage[b[0].skuOuterId] || 0;
+        if (ua !== ub) return ub - ua;
+        return a[1] - b[1];  // 稳定：计数相同按原顺序
+    }).map(x => x[0]);
+}
 
 function openErpModal() {
     if (!lstCatPath.length) { alert('请先选择商品品类再进行选品'); return; }
@@ -1381,17 +1712,21 @@ function renderErpRows() {
 
     // 渲染上限：避免一次插入上万 DOM 节点卡死浏览器
     const LIMIT = 200;
-    const rows = erpAllSkuRows.slice(0, LIMIT);
+    const sorted = erpSortByUsage(erpAllSkuRows);  // 常用计数高的置顶
+    const rows = sorted.slice(0, LIMIT);
     let html = rows.map((sk, idx) => {
         const price    = `¥${parseFloat(sk.purchasePrice || 0).toFixed(2)}`;
         const weight   = `${parseFloat(sk.weight || 0).toFixed(3)}kg`;
         const supplier = sk.hasSupplier === 1 ? '<span style="color:#16a34a;font-size:0.66rem;padding:1px 5px;background:#f0fdf4;border-radius:3px;">代发</span>' : '';
+        const useCnt   = erpUsage[sk.skuOuterId] || 0;
+        const usedTag  = useCnt > 0 ? `<span title="常用次数" style="color:#d97706;font-size:0.64rem;padding:1px 5px;background:#fffbeb;border-radius:3px;flex-shrink:0;">★${useCnt}</span>` : '';
         const isChosen = erpSelectedSkus.some(s => s.itemCode === sk.skuOuterId);
         const chkStyle = isChosen ? 'background:var(--primary);color:#fff;' : '';
         const rowBg    = isChosen ? 'background:var(--primary-light);' : '';
         return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;cursor:pointer;${rowBg}" onclick="erpToggleSingleSku(${idx}, this)">
             <span id="erpSkuChk_${idx}" style="width:16px;height:16px;border:2px solid var(--border);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.6rem;${chkStyle}">${isChosen ? '✓' : ''}</span>
             <span style="flex:1;font-size:0.78rem;font-weight:600;">${ecEscAttr(sk.name)}</span>
+            ${usedTag}
             ${supplier}
             <span style="font-size:0.68rem;color:var(--text-dim);">${ecEscAttr(sk.skuOuterId)}</span>
             <span style="font-size:0.68rem;color:var(--text-dim);white-space:nowrap;">${price} · ${weight}</span>
@@ -1437,6 +1772,7 @@ function erpToggleSingleSku(idx, el) {
                 productName: sk.name,
                 role:        'main'
             });
+            erpBumpUsage(sk.skuOuterId);  // 选中即 +1，用于常用置顶
         }
     }
     erpUpdateCount();
@@ -1446,6 +1782,7 @@ function erpToggleSku(sysItemId, code, productName, checked) {
     if (checked) {
         if (!erpSelectedSkus.find(s => s.itemCode === code)) {
             erpSelectedSkus.push({ sysItemId, itemCode: code, productName });
+            erpBumpUsage(code);  // 选中即 +1，用于常用置顶
         }
     } else {
         erpSelectedSkus = erpSelectedSkus.filter(s => s.itemCode !== code);
@@ -1626,7 +1963,7 @@ function crConfirm() {
         imgDir:      '',
         groupPrice:  0,
         singlePrice: 0,
-        stock:       999,
+        stock:       8888,
         itemCode:    s.skuOuterId,
         cost:        crRowCost(s),       // 材料价（不含运费）
         weight:      parseFloat(s.weight) || 0,
@@ -1671,7 +2008,7 @@ function costConfirm() {
     // 直接传给 AI 生成方案
     lstSkuItems = costSkus.map(s => ({
         name: s.itemCode, imgDir: '', groupPrice: 0, singlePrice: 0,
-        stock: 999, itemCode: s.itemCode, cost: s.cost
+        stock: 8888, itemCode: s.itemCode, cost: s.cost
     }));
     lstRenderSkuList();
     document.getElementById('lstPreview').style.display = 'block';

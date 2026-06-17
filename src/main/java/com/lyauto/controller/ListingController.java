@@ -13,11 +13,33 @@ public class ListingController {
 
     private final ListingService listingService;
     private final com.lyauto.service.ImageGenService imageGenService;
+    private final com.lyauto.service.PromptTemplateService templateService;
 
     public ListingController(ListingService listingService,
-                             com.lyauto.service.ImageGenService imageGenService) {
+                             com.lyauto.service.ImageGenService imageGenService,
+                             com.lyauto.service.PromptTemplateService templateService) {
         this.listingService = listingService;
         this.imageGenService = imageGenService;
+        this.templateService = templateService;
+    }
+
+    /** 防比价模板库：读取（前端下拉/编辑用）。 */
+    @GetMapping("/antiprice-templates")
+    public ResponseEntity<String> getAntiPriceTemplates() {
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .body(templateService.loadJson());
+    }
+
+    /** 防比价模板库：保存（前端编辑后写回，运行时即时生效）。 */
+    @PostMapping("/antiprice-templates")
+    public ResponseEntity<Map<String, Object>> saveAntiPriceTemplates(@RequestBody String json) {
+        try {
+            templateService.saveJson(json);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "保存模板失败：" + e.getMessage()));
+        }
     }
 
     /**
@@ -76,8 +98,18 @@ public class ListingController {
             String refImagePath = (String) body.getOrDefault("refImagePath", "");
             String productType  = (String) body.getOrDefault("productType", "");
             String bagImagePath = (String) body.getOrDefault("bagImagePath", "");
+            String waterImagePath = (String) body.getOrDefault("waterImagePath", "");
+            List<String> accImagePaths = (List<String>) body.getOrDefault("accImagePaths", List.of());
             List<Map<String, Object>> skus = (List<Map<String, Object>>) body.getOrDefault("skus", List.of());
+            String templateId = (String) body.getOrDefault("templateId", "");  // 防比价模板（整批统一）
             String batch = String.valueOf(System.currentTimeMillis());
+
+            // 同批共享背景：优先用前端传入的 bgStyle（前端整批只分析一次再分发，保证并发各 SKU 背景一致）；
+            // 没传则后端自行分析一次。
+            String bgStyle = (String) body.getOrDefault("bgStyle", "");
+            if (bgStyle == null || bgStyle.isBlank()) {
+                bgStyle = imageGenService.analyzeBackgroundStyleOnce(refImagePath);
+            }
 
             List<Map<String, Object>> images = new java.util.ArrayList<>();
             int seq = 1;
@@ -89,7 +121,11 @@ public class ListingController {
                 item.put("name", name);
                 item.put("idx", idx);
                 try {
-                    String path = imageGenService.generateSkuImage(refImagePath, name, comp, productType, batch, seq, bagImagePath);
+                    String whiteImgPath = String.valueOf(s.getOrDefault("whiteImgPath", ""));
+                    String itemCode = String.valueOf(s.getOrDefault("itemCode", ""));
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> accParts = (List<Map<String, Object>>) s.getOrDefault("accParts", List.of());
+                    String path = imageGenService.generateSkuImage(refImagePath, name, comp, productType, batch, seq, bagImagePath, whiteImgPath, accImagePaths, waterImagePath, bgStyle, itemCode, accParts, templateId);
                     item.put("path", path);
                 } catch (Exception e) {
                     item.put("error", e.getMessage());
@@ -102,6 +138,17 @@ public class ListingController {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "生图失败：" + e.getMessage()));
         }
+    }
+
+    /**
+     * 分析主图背景风格（整批生图前调一次，结果回传后由前端分发给每个并发 SKU，保证背景一致）。
+     * 入参：{ refImagePath }  出参：{ bgStyle }
+     */
+    @PostMapping("/analyze-bg")
+    public ResponseEntity<Map<String, Object>> analyzeBg(@RequestBody Map<String, Object> body) {
+        String refImagePath = (String) body.getOrDefault("refImagePath", "");
+        String bgStyle = imageGenService.analyzeBackgroundStyleOnce(refImagePath);
+        return ResponseEntity.ok(Map.of("bgStyle", bgStyle == null ? "" : bgStyle));
     }
 
     /**

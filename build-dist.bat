@@ -16,6 +16,17 @@ echo  LY-Automation build
 echo ============================================================
 echo.
 
+rem ---- 0/6 preflight: 校验 electron\secret.js 生图配置 ----
+echo [0/6] preflight: checking electron\secret.js ...
+if not exist "electron\secret.js" (
+    echo  [ERROR] electron\secret.js 不存在。生图功能需要它。
+    echo          请按 electron\secret.js 模板填写 IMG_PROVIDER / IMG_MODEL / IMG_KEYS。
+    pause & exit /b 1
+)
+if not exist "tools\node\node.exe" ( echo  [ERROR] tools\node\node.exe missing. & pause & exit /b 1 )
+"tools\node\node.exe" "tools\preflight-secret.js"
+if errorlevel 1 ( echo          打包中止：请修正 electron\secret.js 后重试。 & pause & exit /b 1 )
+
 rem ---- 1/6 clean ----
 echo [1/6] cleaning dist / dist-electron / target ...
 if exist "dist-electron" rd /s /q "dist-electron"
@@ -93,4 +104,8 @@ echo ============================================================
 echo  Build complete:
 for %%f in (dist-electron\*.exe) do echo    dist-electron\%%~nxf
 echo ============================================================
+echo.
+echo  安装包已生成在 dist-electron 文件夹，按任意键打开该文件夹...
+pause > nul
+if exist "dist-electron" start "" "dist-electron"
 endlocal

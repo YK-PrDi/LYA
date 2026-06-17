@@ -1,0 +1,1005 @@
+package com.lyauto.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lyauto.config.AppProperties;
+import okhttp3.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.imageio.ImageIO;
+
+/**
+ * GPT Image 生图服务（OpenAI 兼容接口）。
+ * 以参考主图为底，按 SKU 布局描述生成 SKU 展示图。多密钥轮换。
+ */
+@Service
+public class ImageGenService {
+
+    private static final Logger log = LoggerFactory.getLogger(ImageGenService.class);
+
+    private final AppProperties appProperties;
+    private final PromptTemplateService templateService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final AtomicInteger keyCursor = new AtomicInteger(0);
+
+    public ImageGenService(AppProperties appProperties, PromptTemplateService templateService) {
+        this.appProperties = appProperties;
+        this.templateService = templateService;
+    }
+
+    /** 从 compDesc（如"全配+5支滤芯【可用1年】"）提取滤芯数量，无匹配返回 0 */
+    private static int parseFilterCount(String compDesc) {
+        if (compDesc == null || compDesc.isBlank()) return 0;
+        Matcher m = Pattern.compile("(\\d+)\\s*支?\\s*滤芯").matcher(compDesc);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    /** 款式名含「滤芯」但没写数字时的默认滤芯数 */
+    private static int filterCountFor(String compDesc) {
+        int n = parseFilterCount(compDesc);
+        if (n > 0) return n;
+        return (compDesc != null && compDesc.contains("滤芯")) ? 1 : 0;
+    }
+
+    private static boolean hasHose(String d) { return d != null && (d.contains("软管") || d.contains("水管")); }
+    private static boolean hasBase(String d) { return d != null && (d.contains("底座") || d.contains("支架") || d.contains("挂座")); }
+
+    /**
+     * 由款式名（compDesc）决定花洒左侧构图：配件/批量件做成「圆角矩形白底展示卡」——
+     * 卡片中上部展示配件、卡片最底部是一条与场景背景同色的横幅、横幅内写该配件信息。
+     * 左下水质对比维持原样（不做成卡片）。返回中文左侧构图描述，填入模板 {{leftLayout}}。
+     */
+    private static String buildShowerAccDesc(String compDesc, boolean hasWater) {
+        int filters = filterCountFor(compDesc);
+        boolean hose = hasHose(compDesc);
+        boolean base = hasBase(compDesc);
+        boolean hasAcc = filters > 0 || hose || base;
+
+        String cardSpec = "展示卡为圆润边角的矩形白底卡片，卡片中上部为配件展示区（配件居中、留白干净），"
+            + "卡片最底部是一条与整图场景背景同色的横幅，横幅内用简短文字标明该配件信息；";
+
+        // 左下水质对比保持原样：直接摆在场景背景上、不做成白底卡片，文字由模板的「过滤前/过滤后」段处理
+        String cups = hasWater
+            ? "左下层放左右并排的两个玻璃杯做水质对比：只复刻水质对比白底图里两个杯子和杯中水的颜色/浑浊度（左杯浑浊黄水、右杯清澈透明水），不要复制那张参考图的白色背景。两个杯子直接坐落在整图统一的场景背景上，杯子四周不要任何白色衬底或白色方块。"
+            : "左下层放左右并排的两个玻璃杯（左杯浑浊黄水、右杯清澈透明水），两杯外形一致仅水质不同，直接坐落在场景背景上，杯子四周不要任何白色衬底。";
+
+        if (!hasAcc) {
+            return "本款式无搭配配件，左侧不放任何配件展示卡，仅" + cups
+                 + "不要添加软管、滤芯、底座或任何额外物体。";
+        }
+        List<String> accTop = new java.util.ArrayList<>();   // 配件（软管/底座）→ 左上
+        if (hose) accTop.add("软管");
+        if (base) accTop.add("底座");
+        StringBuilder sb = new StringBuilder();
+        if (!accTop.isEmpty()) {
+            sb.append("左上层放搭配配件展示卡：").append(String.join("、", accTop))
+              .append("各自做成一张圆角白底展示卡，").append(cardSpec)
+              .append("配件相对主体适当缩小、卡片之间独立分开不重叠。");
+        }
+        if (filters > 0) {
+            sb.append("左中层放批量件展示卡：一张圆角白底展示卡，卡片中上部按真实数量整齐排列 ")
+              .append(filters).append(" 支滤芯，").append(cardSpec)
+              .append("横幅内标明滤芯数量信息。");
+        }
+        sb.append("配件/批量件的样式、结构、颜色、细节严格参考对应的配件白底图、与白底图一致、不改色。")
+          .append(cups);
+        return sb.toString();
+    }
+
+    /** 数字 1-20 转英文单词，用于 prompt 双重约束（数字+文字） */
+    private static String numberToWords(int n) {
+        String[] words = {"zero","one","two","three","four","five","six","seven",
+                          "eight","nine","ten","eleven","twelve","thirteen","fourteen",
+                          "fifteen","sixteen","seventeen","eighteen","nineteen","twenty"};
+        return n >= 0 && n < words.length ? words[n] : String.valueOf(n);
+    }
+
+    /** 按配置构建 HTTP 客户端（可选代理）。 */
+    private OkHttpClient buildHttp() {
+        OkHttpClient.Builder b = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS);
+        AppProperties.GptImage cfg = appProperties.getGptImage();
+        if (cfg.getProxyHost() != null && !cfg.getProxyHost().isBlank() && cfg.getProxyPort() > 0) {
+            b.proxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
+                new java.net.InetSocketAddress(cfg.getProxyHost(), cfg.getProxyPort())));
+        }
+        return b.build();
+    }
+
+    /** 生图输出目录：用户数据目录下 sku-gen/<batch>/ */
+    private File outputDir(String batch) {
+        File dir = new File(appProperties.getPaths().getUserDataDir(), "sku-gen/" + batch);
+        dir.mkdirs();
+        return dir;
+    }
+
+    /**
+     * 解码 b64 图片，缩放到最长边 ≤1024，转 JPG 保存（quality 0.9），返回输出文件。
+     * 拼多多对单图尺寸/体积有限制，2K PNG 偏大易上传失败，故统一压成 1024 JPG。
+     */
+    private File saveAsJpg(String b64, String batch, int seq, String skuName) throws Exception {
+        byte[] raw = Base64.getDecoder().decode(b64);
+        BufferedImage src = ImageIO.read(new java.io.ByteArrayInputStream(raw));
+        if (src == null) throw new RuntimeException("生图返回的图片无法解码");
+        int max = 1024;
+        int w = src.getWidth(), h = src.getHeight();
+        BufferedImage out;
+        if (w > max || h > max) {
+            double scale = Math.min((double) max / w, (double) max / h);
+            int nw = (int) Math.round(w * scale), nh = (int) Math.round(h * scale);
+            out = new BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = out.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.drawImage(src, 0, 0, nw, nh, null);
+            g.dispose();
+        } else {
+            // 不放大；仅去掉 alpha 通道以便存 JPG
+            out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = out.createGraphics();
+            g.drawImage(src, 0, 0, null);
+            g.dispose();
+        }
+        // 文件名用「序号_款式名」，款式名清洗掉非法字符；为空则只用序号
+        String safe = skuName == null ? "" : skuName.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (safe.length() > 40) safe = safe.substring(0, 40);
+        String fileName = safe.isEmpty() ? (seq + ".jpg") : (seq + "_" + safe + ".jpg");
+        File dst = new File(outputDir(batch), fileName);
+        javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+        param.setCompressionQuality(0.9f);
+        try (javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(dst)) {
+            writer.setOutput(ios);
+            writer.write(null, new javax.imageio.IIOImage(out, null, null), param);
+        } finally {
+            writer.dispose();
+        }
+        return dst;
+    }
+
+    /**
+     * 以 refImagePath 为参考，为某个 SKU 生成一张展示图，保存到 outputDir，返回绝对路径。
+     * 失败抛异常。
+     */
+    public String generateSkuImage(String refImagePath, String skuName, String compDesc,
+                                   String productType, String batch, int seq, String bagImagePath,
+                                   String whiteImgPath, List<String> accImagePaths,
+                                   String waterImagePath, String bgStyleOverride, String itemCode,
+                                   List<Map<String, Object>> accParts, String templateId) throws Exception {
+        AppProperties.GptImage cfg = appProperties.getGptImage();
+        List<String> keys = cfg.keyList();
+        if (keys.isEmpty()) throw new RuntimeException("生图密钥未配置");
+        String baseUrl = cfg.getBaseUrl();
+        String model   = cfg.getModel();
+        boolean gemini = "gemini".equalsIgnoreCase(cfg.getProvider());
+        boolean openai = "openai".equalsIgnoreCase(cfg.getProvider());
+        boolean isShower = productType != null && (productType.contains("花洒") || productType.contains("淋浴"));
+
+        // 防比价模板：templateId 指定则按它决定构图；sticker/空=贴图(现有逻辑)，ai=整图AI生成。
+        Map<String, Object> tpl = (templateId != null && !templateId.isBlank())
+            ? templateService.findById(templateId) : null;
+        boolean aiTemplate = tpl != null && "ai".equalsIgnoreCase(String.valueOf(tpl.get("type")));
+        boolean stickerMode = !aiTemplate;  // 非 ai 模板（含默认/sticker）都走贴图合成
+
+        int filterCount = parseFilterCount(compDesc);
+        String filterConstraint = filterCount > 0
+            ? "ABSOLUTE FILTER COUNT: exactly " + filterCount + " (" + numberToWords(filterCount) + ") "
+              + "white sleek cylindrical filter sticks. "
+              + "These are plain matte white tubes — NO holes, NO handle, NO black rubber, "
+              + "NO water-outlet pattern, NO surface details from the main product. "
+              + "Count them: there must be exactly " + filterCount + " on the left side. "
+            : "";
+
+        String skuPromptTemplate = PromptLoader.load("prompt/image-sku-white-bg.txt");
+        String prompt = skuPromptTemplate
+            .replace("{{productType}}",  productType == null ? "Shower Head" : productType)
+            .replace("{{skuName}}",      skuName)
+            .replace("{{compDesc}}",     compDesc == null || compDesc.isBlank() ? "no accessories" : compDesc)
+            .replace("{{filterConstraint}}", filterConstraint);
+
+        File ref = new File(refImagePath);
+        boolean hasRef = ref.isFile();
+        // 白底产品图：SKU 白底路径用它作视觉参考（干净、无文字水印），回退到营销参考图
+        File whiteBgRef = (whiteImgPath != null && !whiteImgPath.isBlank())
+            ? new File(whiteImgPath) : ref;
+        boolean hasWhiteBg = whiteBgRef.isFile();
+        File bag = (bagImagePath != null && !bagImagePath.isBlank()) ? new File(bagImagePath) : null;
+        boolean hasBag = bag != null && bag.isFile();
+        File water = (waterImagePath != null && !waterImagePath.isBlank()) ? new File(waterImagePath) : null;
+        boolean hasWater = water != null && water.isFile();
+        // 配件白底图筛选：优先用前面【已选的配件清单 accParts】（每项 code+qty）精确匹配白底图文件名——
+        // 这是用户在搭配阶段明确选的配件，最可靠。accParts 为空时回退到 itemCode 配件码 / 中文关键字。
+        boolean needHose = hasHose(compDesc);
+        boolean needBase = hasBase(compDesc);
+        boolean needFilter = filterCountFor(compDesc) > 0;
+        // 候选白底图（已由前端排除袋子/水质/主件色图）
+        java.util.List<File> candFiles = new java.util.ArrayList<>();
+        if (accImagePaths != null) {
+            for (String p : accImagePaths) {
+                if (p == null || p.isBlank()) continue;
+                File f = new File(p);
+                if (f.isFile()) candFiles.add(f);
+            }
+        }
+        List<File> accFiles = new java.util.ArrayList<>();
+        java.util.List<String> accLabels = new java.util.ArrayList<>();  // 与 accFiles 对应：每张配件图的中文身份
+        int filterQtyFromParts = 0;  // 从已选配件清单里拿到的滤芯数量
+        boolean usedParts = false;
+        if (accParts != null && !accParts.isEmpty()) {
+            for (Map<String, Object> part : accParts) {
+                String code = String.valueOf(part.getOrDefault("code", "")).trim();
+                if (code.isEmpty()) continue;
+                int qty = 1;
+                try { qty = Math.max(1, Integer.parseInt(String.valueOf(part.getOrDefault("qty", 1)))); } catch (Exception ignore) {}
+                // 找文件名含该配件码的白底图
+                File hit = null;
+                for (File f : candFiles) {
+                    String nmNoExt = f.getName().replaceAll("\\.[^.]+$", "");
+                    if (nmNoExt.contains(code) || code.contains(nmNoExt)) { hit = f; break; }
+                }
+                if (hit == null) continue;
+                usedParts = true;
+                String nm = hit.getName();
+                String label = nm.contains("软管") || nm.toLowerCase().contains("hose") ? "软管"
+                             : nm.contains("滤芯") || nm.toLowerCase().contains("filter") ? "滤芯"
+                             : nm.contains("底座") || nm.toLowerCase().contains("base") ? "底座" : "配件";
+                if ("滤芯".equals(label)) filterQtyFromParts = Math.max(filterQtyFromParts, qty);
+                accFiles.add(hit);
+                accLabels.add(label);
+            }
+        }
+        // 回退：accParts 没命中任何图时，用旧的 itemCode 配件码 / 中文关键字匹配
+        if (!usedParts) {
+            java.util.List<String> accCodes = new java.util.ArrayList<>();
+            if (itemCode != null && !itemCode.isBlank() && itemCode.contains("+")) {
+                String[] segs = itemCode.split("\\+");
+                for (int i = 1; i < segs.length; i++) {
+                    String code = segs[i].split("\\*")[0].trim();
+                    if (!code.isEmpty()) accCodes.add(code);
+                }
+            }
+            boolean byCode = !accCodes.isEmpty();
+            for (File f : candFiles) {
+                String nm = f.getName();
+                String nmNoExt = nm.replaceAll("\\.[^.]+$", "");
+                boolean keep;
+                if (byCode) {
+                    keep = accCodes.stream().anyMatch(nmNoExt::contains);
+                } else {
+                    boolean isHose = nm.contains("软管") || nm.toLowerCase().contains("hose");
+                    boolean isFilter = nm.contains("滤芯") || nm.toLowerCase().contains("filter");
+                    boolean isBase = nm.contains("底座") || nm.toLowerCase().contains("base");
+                    keep = (isHose && needHose) || (isFilter && needFilter) || (isBase && needBase);
+                }
+                if (keep) {
+                    accFiles.add(f);
+                    String label = nm.contains("软管") || nm.toLowerCase().contains("hose") ? "软管"
+                                 : nm.contains("滤芯") || nm.toLowerCase().contains("filter") ? "滤芯"
+                                 : nm.contains("底座") || nm.toLowerCase().contains("base") ? "底座" : "配件";
+                    accLabels.add(label);
+                }
+            }
+        }
+        // 滤芯展示数量：优先用已选配件清单里的滤芯 qty，没有再用款式名解析值
+        int filterShow = filterQtyFromParts > 0 ? filterQtyFromParts : filterCount;
+        OkHttpClient http = buildHttp();
+
+        // 两阶段：先用视觉模型分析白底主件图，提取真实材质/颜色/结构，注入生图 prompt
+        String refAnalysis = "";
+        if (gemini && hasWhiteBg) {
+            try {
+                String a = analyzeRefImage(http, baseUrl, keys.get(0), whiteBgRef,
+                                           skuName, productType, compDesc);
+                if (a != null && !a.isBlank()) refAnalysis = a;
+            } catch (Exception e) { log.warn("SKU 主件分析失败，降级无分析生图: {}", e.getMessage()); }
+        }
+
+        // ── openai + 花洒：AI 生右侧主件+背景，左侧由 Java 合成贴图（ai 模板则整图AI生成不贴图）──
+        if (openai && isShower) {
+            String bgStyle = "clean light gray studio backdrop, soft diffused lighting";
+            if (aiTemplate) {
+                prompt = String.valueOf(tpl.getOrDefault("prompt", ""))
+                    .replace("{{bgStyle}}",   bgStyle)
+                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+            } else {
+                String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
+                prompt = showerTemplate
+                    .replace("{{bgStyle}}",   bgStyle)
+                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+            }
+
+            // 参考图：本色花洒白底图 + 袋子（配件/水质不传给 AI，左侧由合成贴图）
+            List<File> showerRefs = new java.util.ArrayList<>();
+            if (hasWhiteBg) showerRefs.add(whiteBgRef);
+            if (hasBag && !aiTemplate) showerRefs.add(bag);
+
+            // 一次生成
+            Exception lastShower = null;
+            for (int attempt = 0; attempt < keys.size(); attempt++) {
+                String key = keys.get(Math.abs(keyCursor.getAndIncrement()) % keys.size());
+                try {
+                    String b64 = showerRefs.isEmpty()
+                        ? callGptImage2TextOnly(http, baseUrl, key, model, prompt)
+                        : callGptImage2(http, baseUrl, key, model, prompt, showerRefs);
+                    File out = saveAsJpg(b64, batch, seq, skuName);
+                    if (stickerMode) {
+                        try {
+                            out = compositeShowerLeft(out, accFiles, accLabels, filterShow, water, batch, seq, skuName);
+                        } catch (Exception ce) {
+                            log.warn("花洒左侧合成失败，返回纯主图: {}", ce.getMessage());
+                        }
+                    }
+                    return out.getAbsolutePath();
+                } catch (Exception e) {
+                    lastShower = e;
+                    log.warn("花洒主图失败(密钥{}): {}", attempt, e.getMessage());
+                }
+            }
+            throw new RuntimeException("花洒主图生成失败: " + (lastShower != null ? lastShower.getMessage() : "未知"));
+        }
+
+        // 参考图列表
+        List<File> refs = new java.util.ArrayList<>();
+        if (hasRef) refs.add(ref);
+
+        // SKU 白底图：Flash 只提取参考图背景风格，不碰产品描述
+        String bgDesc = "";
+        if (!isShower) {
+            if (bgStyleOverride != null && !bgStyleOverride.isBlank()) {
+                bgDesc = bgStyleOverride;  // 同批共享的背景描述，优先
+            } else if (gemini && hasRef) {
+                try {
+                    bgDesc = analyzeBackgroundStyle(http, baseUrl, keys.get(0), ref);
+                } catch (Exception e) { log.warn("SKU 背景提取失败: {}", e.getMessage()); }
+            }
+        }
+
+        // 防比价模板：见方法上方已解析的 tpl / aiTemplate / stickerMode
+
+        if (isShower) {
+            // 花洒专属固定构图模板
+            String bgStyle = "纯白或浅色简约影棚背景";
+            if (bgStyleOverride != null && !bgStyleOverride.isBlank()) {
+                bgStyle = bgStyleOverride;  // 同批共享的背景描述，优先
+            } else if (gemini && hasRef) {
+                try {
+                    String bg = analyzeBackgroundStyle(http, baseUrl, keys.get(0), ref);
+                    if (bg != null && !bg.isBlank()) bgStyle = bg;
+                } catch (Exception e) { log.warn("背景风格提取失败: {}", e.getMessage()); }
+            }
+            if (aiTemplate) {
+                // 纯AI模板：用模板 prompt 整图生成，传本色白底图锁色 + 主图背景参考，不贴图
+                String tplPrompt = String.valueOf(tpl.getOrDefault("prompt", ""));
+                prompt = tplPrompt
+                    .replace("{{bgStyle}}",   bgStyle)
+                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+                refs.clear();
+                if (hasWhiteBg) refs.add(whiteBgRef);
+                if (hasRef) refs.add(ref);
+            } else {
+                String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
+                prompt = showerTemplate
+                    .replace("{{bgStyle}}",   bgStyle)
+                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+                // AI 只画右侧主件+背景，左侧配件由 Java 合成贴图。
+                // 参考图：本色花洒白底图（锁颜色/样式）+ 袋子图 + 主图（背景参考）。配件/水质图不传给 AI。
+                refs.clear();
+                if (hasWhiteBg) refs.add(whiteBgRef);
+                if (hasBag) refs.add(bag);
+                if (hasRef) refs.add(ref);
+            }
+        }
+
+        // SKU 白底图：填充主件分析结果占位符 + 追加背景描述到 prompt
+        if (!isShower) {
+            prompt = prompt.replace("{{refAnalysis}}", refAnalysis);
+            if (gemini && !bgDesc.isBlank()) {
+                prompt = prompt + "\n\n[BACKGROUND]: " + bgDesc;
+            }
+        }
+
+        // 生图用图：花洒主图用 refs（营销参考图+袋子），SKU 白底图用白底产品图
+        List<File> genRefs = new java.util.ArrayList<>();
+        if (isShower) {
+            genRefs.addAll(refs);  // 花洒：refs = 营销参考图 + 袋子图
+        } else if (hasWhiteBg) {
+            genRefs.add(whiteBgRef);  // SKU 白底：只用白底产品图
+        } else if (hasRef) {
+            genRefs.add(ref);  // SKU 无白底图时回退
+        }
+
+        // 轮换密钥，失败换下一个
+        Exception last = null;
+        for (int attempt = 0; attempt < keys.size(); attempt++) {
+            String key = keys.get(Math.abs(keyCursor.getAndIncrement()) % keys.size());
+            try {
+                String b64;
+                if (openai) {
+                    b64 = genRefs.isEmpty()
+                        ? callGptImage2TextOnly(http, baseUrl, key, model, prompt)
+                        : callGptImage2(http, baseUrl, key, model, prompt, genRefs);
+                } else {
+                    b64 = callGemini(http, baseUrl, key, model, prompt, genRefs);
+                }
+                File out = saveAsJpg(b64, batch, seq, skuName);
+                // 花洒贴图模式：AI 只生右侧主件+背景，左侧配件/批量件/水质对比由 Java 合成贴图。
+                // 纯AI模板（aiTemplate）整图由 AI 生成，不贴图。
+                if (isShower && stickerMode) {
+                    try {
+                        out = compositeShowerLeft(out, accFiles, accLabels, filterShow, water, batch, seq, skuName);
+                    } catch (Exception ce) {
+                        log.warn("花洒左侧合成失败，返回纯主图: {}", ce.getMessage());
+                    }
+                }
+                return out.getAbsolutePath();
+            } catch (Exception e) {
+                last = e;
+                log.warn("生图失败(密钥{}): {}", attempt, e.getMessage());
+            }
+        }
+        throw new RuntimeException("生图失败：" + (last != null ? last.getMessage() : "未知"));
+    }
+
+    /**
+     * 公开入口：对一张主图分析背景风格，返回简短中文描述。
+     * 供控制器对同批 SKU 只分析一次、全批共享同一背景。失败返回空串（不抛）。
+     */
+    public String analyzeBackgroundStyleOnce(String refImagePath) {
+        try {
+            AppProperties.GptImage cfg = appProperties.getGptImage();
+            if (!"gemini".equalsIgnoreCase(cfg.getProvider())) return "";
+            List<String> keys = cfg.keyList();
+            if (keys.isEmpty()) return "";
+            File ref = new File(refImagePath);
+            if (!ref.isFile()) return "";
+            String bg = analyzeBackgroundStyle(buildHttp(), cfg.getBaseUrl(), keys.get(0), ref);
+            return bg == null ? "" : bg.trim();
+        } catch (Exception e) {
+            log.warn("批量背景分析失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** 只提取参考图的背景风格（颜色/材质/光感），返回简短中文描述。 */
+    @SuppressWarnings("unchecked")
+    private String analyzeBackgroundStyle(OkHttpClient http, String baseUrl, String key, File ref) throws Exception {
+        String sys = PromptLoader.load("prompt/image-analyze-bg-style.txt");
+        List<Object> parts = new java.util.ArrayList<>();
+        parts.add(Map.of("text", sys));
+        String data = Base64.getEncoder().encodeToString(Files.readAllBytes(ref.toPath()));
+        parts.add(Map.of("inline_data", Map.of("mime_type", mimeOf(ref), "data", data)));
+        Map<String, Object> payload = Map.of("contents", List.of(Map.of("parts", parts)));
+        String json = objectMapper.writeValueAsString(payload);
+        String url = baseUrl + "/v1beta/models/gemini-2.5-flash:generateContent?key=" + key;
+        Request req = new Request.Builder()
+            .url(url).header("Content-Type", "application/json")
+            .post(RequestBody.create(json, MediaType.parse("application/json"))).build();
+        try (Response resp = http.newCall(req).execute()) {
+            String body = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) throw new RuntimeException("背景分析 HTTP " + resp.code() + ": " + body);
+            Map<String, Object> m = objectMapper.readValue(body, Map.class);
+            List<Map<String, Object>> candidates = (List<Map<String, Object>>) m.get("candidates");
+            if (candidates == null || candidates.isEmpty()) return null;
+            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+            List<Map<String, Object>> rparts = (List<Map<String, Object>>) content.get("parts");
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> p : rparts) {
+                Object t = p.get("text");
+                if (t instanceof String) sb.append((String) t);
+            }
+            return sb.toString().trim();
+        }
+    }
+
+    /** 阶段一：用 Gemini 视觉模型分析参考图，产出结构化英文生图 prompt。 */
+    @SuppressWarnings("unchecked")
+    private String analyzeRefImage(OkHttpClient http, String baseUrl, String key, File ref,
+                                   String skuName, String productType, String compDesc) throws Exception {
+        int filterCount = parseFilterCount(compDesc);
+        String filterNote = filterCount > 0
+            ? " (including exactly " + filterCount + " filter cartridges)" : "";
+
+        String template = PromptLoader.load("prompt/image-sku-analyze-ref.txt");
+        String sys = template
+            .replace("{{productType}}", productType == null ? "" : productType)
+            .replace("{{compDesc}}",    compDesc == null || compDesc.isBlank() ? "single main item" : compDesc)
+            .replace("{{filterNote}}",  filterNote);
+
+        // 用视觉文本模型（flash），非生图模型
+        String visionModel = "gemini-2.5-flash";
+        List<Object> parts = new java.util.ArrayList<>();
+        parts.add(Map.of("text", sys));
+        String data = Base64.getEncoder().encodeToString(Files.readAllBytes(ref.toPath()));
+        parts.add(Map.of("inline_data", Map.of("mime_type", mimeOf(ref), "data", data)));
+        Map<String, Object> payload = Map.of("contents", List.of(Map.of("parts", parts)));
+        String json = objectMapper.writeValueAsString(payload);
+
+        String url = baseUrl + "/v1beta/models/" + visionModel + ":generateContent?key=" + key;
+        Request req = new Request.Builder()
+            .url(url).header("Content-Type", "application/json")
+            .post(RequestBody.create(json, MediaType.parse("application/json"))).build();
+        try (Response resp = http.newCall(req).execute()) {
+            String body = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) throw new RuntimeException("分析 HTTP " + resp.code() + ": " + body);
+            Map<String, Object> m = objectMapper.readValue(body, Map.class);
+            List<Map<String, Object>> candidates = (List<Map<String, Object>>) m.get("candidates");
+            if (candidates == null || candidates.isEmpty()) return null;
+            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+            List<Map<String, Object>> rparts = (List<Map<String, Object>>) content.get("parts");
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> p : rparts) {
+                Object t = p.get("text");
+                if (t instanceof String) sb.append((String) t);
+            }
+            return sb.toString().trim();
+        }
+    }
+
+    /** Gemini generateContent 图生图/文生图。多张参考图作为 inline_data 传入。返回 b64。 */
+    @SuppressWarnings("unchecked")
+    private String callGemini(OkHttpClient http, String baseUrl, String key, String model,
+                              String prompt, List<File> refs) throws Exception {
+        List<Object> parts = new java.util.ArrayList<>();
+        parts.add(Map.of("text", prompt));
+        if (refs != null) {
+            for (File ref : refs) {
+                if (ref == null || !ref.isFile()) continue;
+                String data = Base64.getEncoder().encodeToString(Files.readAllBytes(ref.toPath()));
+                parts.add(Map.of("inline_data", Map.of("mime_type", mimeOf(ref), "data", data)));
+            }
+        }
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("contents", List.of(Map.of("parts", parts)));
+        // 生图质量参数：responseModalities + 宽高比/分辨率（gemini-3-pro-image 支持）
+        AppProperties.GptImage cfg = appProperties.getGptImage();
+        Map<String, Object> genCfg = new java.util.LinkedHashMap<>();
+        genCfg.put("responseModalities", List.of("TEXT", "IMAGE"));
+        genCfg.put("responseFormat", Map.of("image", Map.of(
+            "aspectRatio", cfg.getAspectRatio(),
+            "imageSize",   cfg.getImageSize())));
+        payload.put("generationConfig", genCfg);
+        String json = objectMapper.writeValueAsString(payload);
+
+        String url = baseUrl + "/v1beta/models/" + model + ":generateContent?key=" + key;
+        Request req = new Request.Builder()
+            .url(url)
+            .header("Content-Type", "application/json")
+            .post(RequestBody.create(json, MediaType.parse("application/json"))).build();
+
+        try (Response resp = http.newCall(req).execute()) {
+            String body = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) throw new RuntimeException("Gemini HTTP " + resp.code() + ": " + body);
+            Map<String, Object> m = objectMapper.readValue(body, Map.class);
+            List<Map<String, Object>> candidates = (List<Map<String, Object>>) m.get("candidates");
+            if (candidates == null || candidates.isEmpty()) throw new RuntimeException("无候选返回: " + body);
+            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+            List<Map<String, Object>> rparts = (List<Map<String, Object>>) content.get("parts");
+            for (Map<String, Object> p : rparts) {
+                Map<String, Object> inline = (Map<String, Object>) p.get("inlineData");
+                if (inline == null) inline = (Map<String, Object>) p.get("inline_data");
+                if (inline != null) {
+                    Object d = inline.get("data");
+                    if (d instanceof String && !((String) d).isBlank()) return (String) d;
+                }
+            }
+            throw new RuntimeException("响应无图片数据: " + body);
+        }
+    }
+
+    /** 执行请求，从响应 data[0] 取 b64_json；若只给 url 则下载转 b64。 */
+    @SuppressWarnings("unchecked")
+    private String extractB64(OkHttpClient http, Request req) throws Exception {
+        try (Response resp = http.newCall(req).execute()) {
+            String body = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) throw new RuntimeException("HTTP " + resp.code() + ": " + body);
+            Map<String, Object> m = objectMapper.readValue(body, Map.class);
+            List<Map<String, Object>> data = (List<Map<String, Object>>) m.get("data");
+            if (data == null || data.isEmpty()) throw new RuntimeException("无图片返回: " + body);
+            Map<String, Object> first = data.get(0);
+            Object b64 = first.get("b64_json");
+            if (b64 instanceof String && !((String) b64).isBlank()) return (String) b64;
+            Object url = first.get("url");
+            if (url instanceof String && !((String) url).isBlank()) {
+                Request dl = new Request.Builder().url((String) url).get().build();
+                try (Response r2 = http.newCall(dl).execute()) {
+                    if (!r2.isSuccessful() || r2.body() == null) throw new RuntimeException("下载图片失败");
+                    return Base64.getEncoder().encodeToString(r2.body().bytes());
+                }
+            }
+            throw new RuntimeException("响应无 b64_json/url: " + body);
+        }
+    }
+
+    /** gpt-image-2 图生图/文生图。与 ele-business-java GptImageAgent 完全一致的 multipart form 调用。返回 b64。 */
+    @SuppressWarnings("unchecked")
+    private String callGptImage2(OkHttpClient http, String baseUrl, String key, String model,
+                                 String prompt, List<File> refs) throws Exception {
+        String boundary = "----GptImageBoundary" + Long.toHexString(System.currentTimeMillis());
+        java.net.URL url = new java.net.URL(baseUrl + "/v1/images/edits");
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        conn.setRequestProperty("Authorization", "Bearer " + key);
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(300_000);
+
+        try (java.io.OutputStream os = conn.getOutputStream()) {
+            writeField(os, boundary, "model", model);
+            writeField(os, boundary, "prompt", prompt != null ? prompt : "product photo");
+            writeField(os, boundary, "size", "1024x1024");
+            writeField(os, boundary, "quality", "high");
+            writeField(os, boundary, "output_format", "jpeg");
+            if (refs != null) {
+                String fieldName = refs.size() == 1 ? "image" : "image[]";
+                for (File f : refs) {
+                    writeFile(os, boundary, fieldName, f);
+                }
+            }
+            os.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        }
+
+        int status = conn.getResponseCode();
+        String respBody;
+        try (java.io.InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream()) {
+            respBody = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } finally {
+            conn.disconnect();
+        }
+
+        if (status < 200 || status >= 300) {
+            throw new RuntimeException("gpt-image-2 HTTP " + status + ": " + respBody);
+        }
+
+        Map<String, Object> m = objectMapper.readValue(respBody, Map.class);
+        List<Map<String, Object>> data = (List<Map<String, Object>>) m.get("data");
+        if (data == null || data.isEmpty()) throw new RuntimeException("无图片返回: " + respBody);
+        Map<String, Object> item = data.get(0);
+        Object b64 = item.get("b64_json");
+        if (b64 instanceof String && !((String) b64).isBlank()) return (String) b64;
+        Object imgUrl = item.get("url");
+        if (imgUrl instanceof String && !((String) imgUrl).isBlank()) {
+            // 下载转 b64
+            java.net.URL dl = new java.net.URL((String) imgUrl);
+            java.net.HttpURLConnection c2 = (java.net.HttpURLConnection) dl.openConnection();
+            c2.setConnectTimeout(15_000);
+            c2.setReadTimeout(60_000);
+            try (java.io.InputStream in = c2.getInputStream()) {
+                return Base64.getEncoder().encodeToString(in.readAllBytes());
+            } finally { c2.disconnect(); }
+        }
+        throw new RuntimeException("响应无 b64_json/url: " + respBody);
+    }
+
+    private void writeField(java.io.OutputStream os, String boundary, String name, String value) throws Exception {
+        String part = "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n"
+                + value + "\r\n";
+        os.write(part.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void writeFile(java.io.OutputStream os, String boundary, String fieldName, File file) throws Exception {
+        String filename = file.getName();
+        String mime = filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+        String header = "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + filename + "\"\r\n"
+                + "Content-Type: " + mime + "\r\n\r\n";
+        os.write(header.getBytes(StandardCharsets.UTF_8));
+        os.write(Files.readAllBytes(file.toPath()));
+        os.write("\r\n".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** gpt-image-2 文生图（无参考图）。返回 b64。 */
+    private String callGptImage2TextOnly(OkHttpClient http, String baseUrl, String key,
+                                         String model, String prompt) throws Exception {
+        return callGptImage2(http, baseUrl, key, model, prompt, java.util.List.of());
+    }
+
+    private String mimeOf(File f) {
+        String n = f.getName().toLowerCase();
+        return n.endsWith(".png") ? "image/png" : n.endsWith(".webp") ? "image/webp" : "image/jpeg";
+    }
+
+    /**
+     * Gemini 文本/多模态生成：返回纯文本。供标题生成等复用（走同一套代理/密钥）。
+     * imagePaths 为空则纯文本；否则把图片作为 inline_data 一起传（最多3张）。
+     */
+    @SuppressWarnings("unchecked")
+    public String geminiText(String prompt, List<String> imagePaths) throws Exception {
+        AppProperties.GptImage cfg = appProperties.getGptImage();
+        List<String> keys = cfg.keyList();
+        if (keys.isEmpty()) throw new RuntimeException("Gemini 密钥未配置");
+        String baseUrl = cfg.getBaseUrl();
+        String key = keys.get(0);
+        OkHttpClient http = buildHttp();
+
+        List<Object> parts = new java.util.ArrayList<>();
+        parts.add(Map.of("text", prompt));
+        if (imagePaths != null) {
+            int n = 0;
+            for (String p : imagePaths) {
+                if (n >= 3) break;
+                File f = new File(p);
+                if (!f.isFile()) continue;
+                String data = Base64.getEncoder().encodeToString(Files.readAllBytes(f.toPath()));
+                parts.add(Map.of("inline_data", Map.of("mime_type", mimeOf(f), "data", data)));
+                n++;
+            }
+        }
+        Map<String, Object> payload = Map.of("contents", List.of(Map.of("parts", parts)));
+        String json = objectMapper.writeValueAsString(payload);
+
+        String url = baseUrl + "/v1beta/models/gemini-2.5-flash:generateContent?key=" + key;
+        Request req = new Request.Builder()
+            .url(url).header("Content-Type", "application/json")
+            .post(RequestBody.create(json, MediaType.parse("application/json"))).build();
+        try (Response resp = http.newCall(req).execute()) {
+            String body = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) throw new RuntimeException("Gemini 文本 HTTP " + resp.code() + ": " + body);
+            Map<String, Object> m = objectMapper.readValue(body, Map.class);
+            List<Map<String, Object>> candidates = (List<Map<String, Object>>) m.get("candidates");
+            if (candidates == null || candidates.isEmpty()) throw new RuntimeException("无候选返回: " + body);
+            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+            List<Map<String, Object>> rparts = (List<Map<String, Object>>) content.get("parts");
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> p : rparts) {
+                Object t = p.get("text");
+                if (t instanceof String) sb.append((String) t);
+            }
+            return sb.toString().trim();
+        }
+    }
+
+    /**
+     * 花洒专属：AI 只生右侧主件+背景，左侧由本方法用白底图合成贴上。
+     * 左上=配件卡（软管/底座），左中=批量件卡（滤芯并排），左下=水质对比图直接贴。
+     * 每张配件/批量件卡=圆角白底卡 + 卡中上部贴抠白底的配件图 + 卡底部背景同色横幅（写配件名）。
+     * 失败抛异常，由调用方降级为纯主图。
+     */
+    private File compositeShowerLeft(File baseImg, List<File> accFiles, List<String> accLabels,
+                                     int filterCount, File waterImg, String batch, int seq, String skuName) throws Exception {
+        BufferedImage base = ImageIO.read(baseImg);
+        if (base == null) throw new RuntimeException("合成读图失败");
+        int W = base.getWidth(), H = base.getHeight();
+        Graphics2D g = base.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        Color banner = sampleBgColor(base);  // 横幅用背景同色
+
+        // 左侧区域：x ∈ [3%, 47%]
+        int lx = (int)(W * 0.03), lw = (int)(W * 0.44);
+        // 三段纵向布局：左上配件 / 左中滤芯 / 左下水质
+        // 配件卡（软管/底座）放左上
+        java.util.List<File> topCards = new java.util.ArrayList<>();
+        java.util.List<String> topLabels = new java.util.ArrayList<>();
+        for (int i = 0; i < accFiles.size(); i++) {
+            String lb = accLabels.get(i);
+            if ("软管".equals(lb) || "底座".equals(lb)) { topCards.add(accFiles.get(i)); topLabels.add(lb); }
+        }
+        File filterImg = null;
+        for (int i = 0; i < accFiles.size(); i++) if ("滤芯".equals(accLabels.get(i))) filterImg = accFiles.get(i);
+
+        boolean hasWater = waterImg != null && waterImg.isFile();
+        // 纵向分配：根据有无各部分动态切段，留 2% 间距
+        int gap = (int)(H * 0.02);
+        int yTop = (int)(H * 0.04);
+        int regionBottom = (int)(H * 0.96);
+        // 估算需要的段数权重
+        boolean hasTop = !topCards.isEmpty();
+        boolean hasFilter = filterImg != null && filterCount > 0;
+        int segCount = (hasTop ? 1 : 0) + (hasFilter ? 1 : 0) + (hasWater ? 1 : 0);
+        if (segCount == 0) { g.dispose(); return baseImg; }  // 无任何左侧内容，直接返回
+        int segH = (regionBottom - yTop - gap * (segCount - 1)) / segCount;
+
+        int cy = yTop;
+        if (hasTop) {
+            // 多个配件横向并排在同一段内
+            int n = topCards.size();
+            int cardW = (lw - gap * (n - 1)) / n;
+            for (int i = 0; i < n; i++) {
+                int cx = lx + i * (cardW + gap);
+                drawAccCard(g, cx, cy, cardW, segH, topCards.get(i), topLabels.get(i), 1, banner);
+            }
+            cy += segH + gap;
+        }
+        if (hasFilter) {
+            drawAccCard(g, lx, cy, lw, segH, filterImg, filterCount + "个过滤滤芯", filterCount, banner);
+            cy += segH + gap;
+        }
+        if (hasWater) {
+            // 水质对比图直接贴（不抠白底、保持原样），等比缩放进该段
+            BufferedImage wimg = ImageIO.read(waterImg);
+            if (wimg != null) drawImageFit(g, wimg, lx, cy, lw, segH);
+        }
+
+        g.dispose();
+        // 存为 jpg（沿用命名）
+        return writeJpg(base, batch, seq, skuName);
+    }
+
+    /** 采样左侧边缘像素求平均作为背景代表色（用于横幅同色）。 */
+    private Color sampleBgColor(BufferedImage img) {
+        int W = img.getWidth(), H = img.getHeight();
+        long r = 0, gg = 0, b = 0; int n = 0;
+        int x = (int)(W * 0.02);
+        for (double fy : new double[]{0.15, 0.30, 0.45, 0.60, 0.75}) {
+            int y = (int)(H * fy);
+            int rgb = img.getRGB(x, y);
+            r += (rgb >> 16) & 0xFF; gg += (rgb >> 8) & 0xFF; b += rgb & 0xFF; n++;
+        }
+        if (n == 0) return new Color(120, 120, 120);
+        return new Color((int)(r / n), (int)(gg / n), (int)(b / n));
+    }
+
+    /** 画一张配件卡：圆角白底卡 + 卡中上部贴抠白底配件图(repeat 份横排) + 底部横幅写 label。 */
+    private void drawAccCard(Graphics2D g, int x, int y, int w, int h,
+                             File accImg, String label, int repeat, Color banner) throws Exception {
+        int arc = (int)(Math.min(w, h) * 0.12);
+        // 白底圆角卡
+        g.setColor(Color.WHITE);
+        g.fillRoundRect(x, y, w, h, arc, arc);
+        // 横幅高度 ~22% 卡高
+        int bh = (int)(h * 0.22);
+        int by = y + h - bh;
+        // 配件展示区（横幅以上）
+        int padTop = (int)(h * 0.06);
+        int areaY = y + padTop, areaH = by - areaY - (int)(h * 0.03);
+        BufferedImage acc = whiteToTransparent(ImageIO.read(accImg));
+        if (acc != null && repeat > 0) {
+            int slotW = w / repeat;
+            for (int i = 0; i < repeat; i++) {
+                drawImageFit(g, acc, x + i * slotW + (int)(slotW * 0.08), areaY,
+                             (int)(slotW * 0.84), areaH);
+            }
+        }
+        // 底部横幅（背景同色）+ 圆角只在底部，用普通矩形贴合卡内
+        g.setColor(banner);
+        g.fillRoundRect(x, by, w, bh, arc, arc);
+        g.fillRect(x, by, w, bh / 2);  // 横幅上半部填平直角，仅底部留圆角
+        // 横幅文字（白色微软雅黑，居中）
+        if (label != null && !label.isBlank()) {
+            int fs = Math.max(12, (int)(bh * 0.5));
+            g.setFont(new Font("Microsoft YaHei", Font.BOLD, fs));
+            java.awt.FontMetrics fm = g.getFontMetrics();
+            String t = label.length() > 12 ? label.substring(0, 12) : label;
+            int tw = fm.stringWidth(t);
+            int tx = x + (w - tw) / 2, ty = by + (bh - fm.getHeight()) / 2 + fm.getAscent();
+            // 深色背景白字、浅色背景深字（按横幅亮度自适应）
+            double lum = 0.299 * banner.getRed() + 0.587 * banner.getGreen() + 0.114 * banner.getBlue();
+            g.setColor(lum < 140 ? Color.WHITE : new Color(40, 40, 40));
+            g.drawString(t, tx, ty);
+        }
+    }
+
+    /** 等比缩放把 img 贴进 (x,y,w,h) 居中区域。 */
+    private void drawImageFit(Graphics2D g, BufferedImage img, int x, int y, int w, int h) {
+        int iw = img.getWidth(), ih = img.getHeight();
+        double scale = Math.min((double) w / iw, (double) h / ih);
+        int nw = (int)(iw * scale), nh = (int)(ih * scale);
+        int nx = x + (w - nw) / 2, ny = y + (h - nh) / 2;
+        g.drawImage(img, nx, ny, nw, nh, null);
+    }
+
+    /** 白底转透明：RGB 三通道均 >238 的像素 alpha 置 0（去掉白底图的白背景）。 */
+    private BufferedImage whiteToTransparent(BufferedImage src) {
+        if (src == null) return null;
+        int W = src.getWidth(), H = src.getHeight();
+        BufferedImage out = new BufferedImage(W, H, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                int argb = src.getRGB(x, y);
+                int r = (argb >> 16) & 0xFF, gg = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                if (r > 238 && gg > 238 && b > 238) out.setRGB(x, y, 0x00FFFFFF);
+                else out.setRGB(x, y, argb);
+            }
+        }
+        return out;
+    }
+
+    /** 把 BufferedImage 压成 1024 JPG 存到 sku-gen/<batch>/<seq>_<name>.jpg。 */
+    private File writeJpg(BufferedImage img, String batch, int seq, String skuName) throws Exception {
+        int max = 1024, w = img.getWidth(), h = img.getHeight();
+        BufferedImage out;
+        if (w > max || h > max) {
+            double scale = Math.min((double) max / w, (double) max / h);
+            int nw = (int)(w * scale), nh = (int)(h * scale);
+            out = new BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB);
+            Graphics2D gg = out.createGraphics();
+            gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            gg.drawImage(img, 0, 0, nw, nh, null); gg.dispose();
+        } else {
+            out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            Graphics2D gg = out.createGraphics(); gg.drawImage(img, 0, 0, null); gg.dispose();
+        }
+        String safe = skuName == null ? "" : skuName.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (safe.length() > 40) safe = safe.substring(0, 40);
+        String fileName = safe.isEmpty() ? (seq + ".jpg") : (seq + "_" + safe + ".jpg");
+        File dst = new File(outputDir(batch), fileName);
+        javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+        param.setCompressionQuality(0.9f);
+        try (javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(dst)) {
+            writer.setOutput(ios);
+            writer.write(null, new javax.imageio.IIOImage(out, null, null), param);
+        } finally { writer.dispose(); }
+        return dst;
+    }
+
+    /**
+     * 在花洒主图上用 Graphics2D 叠加全部中文标签。
+     * AI 生图阶段输出零文字纯图片，所有标签由此方法绘制，确保中文清晰无乱码。
+     */
+    private File overlayChineseLabels(File imageFile, String batch, int seq) throws Exception {
+        BufferedImage img = ImageIO.read(imageFile);
+        if (img == null) throw new RuntimeException("无法读取图片: " + imageFile);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        int w = img.getWidth();
+        int h = img.getHeight();
+
+        // ── 左杯上方 "过滤前" — 灰色标签 + 半透明白色底衬 ──
+        Font cupFont = new Font("Microsoft YaHei", Font.BOLD, (int)(w * 0.026));
+        drawLabelWithBacking(g, "过滤前", (int)(w * 0.075), (int)(h * 0.77),
+                             new Color(128, 128, 128), cupFont,
+                             new Color(255, 255, 255, 160));
+
+        // ── 右杯上方 "过滤后" — 红色标签 + 半透明白色底衬 ──
+        drawLabelWithBacking(g, "过滤后", (int)(w * 0.225), (int)(h * 0.77),
+                             new Color(220, 38, 38), cupFont,
+                             new Color(255, 255, 255, 160));
+
+        // 注：包装袋上的「手持花洒」「品质保证」等文字由袋子参考图自带，不再叠加。
+
+        g.dispose();
+        File out = new File(outputDir(batch), seq + ".png");
+        ImageIO.write(img, "png", out);
+        return out;
+    }
+
+    /** 居中绘制带半透明底衬的文字标签，确保在任何背景上都可读 */
+    private void drawLabelWithBacking(Graphics2D g, String text, int cx, int cy,
+                                       Color textColor, Font font, Color backingColor) {
+        g.setFont(font);
+        java.awt.FontMetrics fm = g.getFontMetrics();
+        int tw = fm.stringWidth(text);
+        int th = fm.getHeight();
+        int x = cx - tw / 2;
+        int y = cy - th / 2 + fm.getAscent();
+        int pad = (int)(th * 0.2);
+
+        // 底衬
+        g.setColor(backingColor);
+        g.fillRoundRect(x - pad, cy - th / 2 - pad, tw + pad * 2, th + pad * 2, pad * 2, pad * 2);
+        // 文字
+        g.setColor(textColor);
+        g.drawString(text, x, y);
+    }
+}
