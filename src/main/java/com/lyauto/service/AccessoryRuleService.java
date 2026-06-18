@@ -76,6 +76,21 @@ public class AccessoryRuleService {
         return null;
     }
 
+    /** 只按品类取规则（忽略主件覆盖），用于阶梯回退。 */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> ruleForCategoryOnly(String category) {
+        try {
+            Map<String, Object> root = om.readValue(loadJson(), Map.class);
+            Map<String, Object> byCat = (Map<String, Object>) root.getOrDefault("byCategory", Map.of());
+            if (category != null) {
+                if (byCat.get(category) instanceof Map) return (Map<String, Object>) byCat.get(category);
+                String leaf = category.contains(">") ? category.substring(category.lastIndexOf('>') + 1).trim() : category.trim();
+                if (byCat.get(leaf) instanceof Map) return (Map<String, Object>) byCat.get(leaf);
+            }
+        } catch (Exception e) { log.warn("解析品类规则失败: {}", e.getMessage()); }
+        return null;
+    }
+
     /**
      * 根据规则 + ERP 单品池，解析出该主件应搭配的配件/批量件单品 + 阶梯定义。
      * 返回 { ladders:[...](可能空), accSkus:[{itemCode,name,role,keyword,defaultQty}...] }。
@@ -91,6 +106,13 @@ public class AccessoryRuleService {
         if (rule != null) {
             Object ld = rule.get("ladders");
             if (ld instanceof List) ladders.addAll((List<Object>) ld);
+            // byMainCode 通常只给 accessories（候选），阶梯回退到品类默认
+            if (ladders.isEmpty()) {
+                Map<String, Object> catRule = ruleForCategoryOnly(category);
+                if (catRule != null && catRule.get("ladders") instanceof List) {
+                    ladders.addAll((List<Object>) catRule.get("ladders"));
+                }
+            }
             Object accs = rule.get("accessories");
             if (accs instanceof List) {
                 for (Object a : (List<Object>) accs) {
@@ -109,11 +131,25 @@ public class AccessoryRuleService {
                         }
                     }
                     if (hit != null) {
+                        // 通用类型（供阶梯的 match 用，如 软管/底座/滤芯）
+                        String type = kw.contains("软管") ? "软管" : kw.contains("底座") ? "底座" : kw.contains("滤芯") ? "滤芯" : kw;
+                        // 软管去重：只保留一条，优先 1.5 米
+                        if ("软管".equals(type)) {
+                            boolean hasHose = accSkus.stream().anyMatch(x -> "软管".equals(x.get("type")));
+                            if (hasHose) {
+                                if (kw.contains("1.5")) {
+                                    accSkus.removeIf(x -> "软管".equals(x.get("type")));  // 用 1.5 米替换已有
+                                } else {
+                                    continue;  // 已有软管且当前不是 1.5 米，跳过
+                                }
+                            }
+                        }
                         Map<String, Object> as = new java.util.LinkedHashMap<>();
                         as.put("itemCode", hit.getOrDefault("itemCode", hit.getOrDefault("skuOuterId", "")));
                         as.put("name", hit.getOrDefault("name", hit.getOrDefault("productName", "")));
                         as.put("role", role);
                         as.put("keyword", kw);
+                        as.put("type", type);
                         as.put("defaultQty", defQty);
                         accSkus.add(as);
                     } else {

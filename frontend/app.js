@@ -785,15 +785,41 @@ async function lyAutoRun() {
         });
         const rule = await rresp.json();
         if (rule.error) throw new Error(rule.error);
-        const ladders = rule.ladders || [];
+        let ladders = rule.ladders || [];
         const accSkus = rule.accSkus || [];
-        if (!ladders.length) {
-            alert('该品类规则库未定义阶梯型号，请在「⚙️设置→编辑规则库」补充，或改用人工模式。');
-            return;
-        }
-        // 2) 按阶梯为每个选中主件构造 SKU（itemCode=主件码+配件码，accParts 带数量）
+        // accSkus 建索引（按通用类型 + 关键字 + 编码，供 AI 阶梯回映）
         const accByKw = {};
-        accSkus.forEach(a => { accByKw[a.keyword] = a; });
+        const codeToType = {};
+        accSkus.forEach(a => {
+            accByKw[a.type || a.keyword] = a;
+            if (a.keyword) accByKw[a.keyword] = a;
+            if (a.itemCode) codeToType[a.itemCode] = a.type || a.keyword;
+        });
+        // 阶梯全交 AI：规则库不再写死阶梯，调 generate-sku-plans 让 AI 自由组合（含滤芯数量）
+        if (!ladders.length) {
+            if (!accSkus.length) { alert('该主件在规则库/ERP 里没找到可搭配的配件，请检查规则库或改用人工模式。'); return; }
+            const planCount = lyGetSettings().planMode === '1' ? 1 : 4;
+            const aiSkus = [
+                { itemCode: mainCode, name: erpSelectedSkus[0]?.productName || mainCode, role: 'main' }
+            ].concat(accSkus.map(a => ({ itemCode: a.itemCode, name: a.name, role: a.role || 'accessory' })));
+            const gResp = await fetch('/api/listing/generate-sku-plans', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    category, brand: document.getElementById('lstBrand').value.trim(),
+                    material: panelMaterialVal() || '塑料', planCount, skus: aiSkus
+                })
+            });
+            const gData = await gResp.json();
+            const plan = (gData.plans || [])[0];
+            if (!plan || !(plan.models || []).length) { alert('AI 搭配方案生成失败，请重试或改用人工模式。'); return; }
+            // 把 AI 的 models 转成 ladder 结构（components.itemCode → 通用 match）
+            ladders = plan.models.map(md => ({
+                name: md.specName || '型号',
+                components: (md.components || []).map(c => ({
+                    match: codeToType[c.itemCode] || c.itemCode, qty: parseInt(c.qty) || 1
+                }))
+            }));
+        }
         // 成本/重量查表（来自 ERP 单品行）
         const costMap = {};
         (window._erpAllSkuRowsFull || []).forEach(r => {
