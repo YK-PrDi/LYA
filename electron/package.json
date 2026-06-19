@@ -38,7 +38,8 @@
       { "from": "../tools/pdd_listing.js",  "to": "tools/pdd_listing.js" },
       { "from": "../tools/node",            "to": "tools/node"           },
       { "from": "../tools/node_modules",    "to": "tools/node_modules"   },
-      { "from": "../tools/browsers",        "to": "tools/browsers"       }
+      { "from": "../tools/browsers",        "to": "tools/browsers"       },
+      { "from": "../tools", "to": ".", "filter": ["vc_redist.x64.exe"] }
     ],
     "directories": {
       "output": "../dist-electron"

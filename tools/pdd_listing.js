@@ -346,6 +346,33 @@ async function main() {
         log('发布页: ' + page.url());
         // 关闭可能出现的弹窗
         await closePddPopups();
+
+        // ── STEP 1.5：拼多多改版后，发布新商品会先出现「以图发品 / 搜索发品」选择，需先点「搜索发品」进类目搜索 ──
+        try {
+            const entryClicked = await page.evaluate(() => {
+                // 精确点「搜索发品」的 tab 标签（class=search-tab-label），不要点到顶部全局搜索框
+                const labels = [...document.querySelectorAll('.search-tab-label, [class*="search-tab-label"], [class*="tab-label"]')];
+                for (const el of labels) {
+                    if ((el.textContent || '').replace(/\s+/g, '') === '搜索发品') {
+                        let t = el;
+                        while (t && t.offsetParent === null && t.parentElement) t = t.parentElement;
+                        (t || el).click();
+                        return true;
+                    }
+                }
+                // 兜底：全局找文字恰为「搜索发品」的可点击元素（排除 input）
+                for (const el of document.querySelectorAll('div,span,button,a')) {
+                    if (el.tagName !== 'INPUT' && (el.textContent || '').replace(/\s+/g, '') === '搜索发品') {
+                        el.click(); return true;
+                    }
+                }
+                return false;
+            });
+            if (entryClicked) { log('STEP1.5: 已点击「搜索发品」'); await page.waitForTimeout(2000); }
+            else log('STEP1.5: 未出现「搜索发品」选择（可能已直接在类目页或旧版页面）');
+        } catch (e) { log('STEP1.5: 处理发品方式选择跳过: ' + e.message.split('\n')[0]); }
+
+        await closePddPopups();
         if (dryRun) { await page.screenshot({ path: 'step1_add_page.png' }); log('截图已保存: step1_add_page.png'); }
 
         // ── STEP 2：选择商品类目 ────────────────────────────────────────
@@ -369,8 +396,18 @@ async function main() {
 
         const category = config.category || '';
         if (category) {
-            // 品类页的分类搜索框（不是顶部全局搜索框）
-            const searchInput = await page.$('input[placeholder*="搜索分类"], input[placeholder*="关键词搜索"]');
+            // 品类页的分类搜索框（拼多多新版 placeholder「请输入类目关键词」）。
+            // 必须排除顶部全局搜索框（class 含 mms-header / placeholder 含「搜索功能」）。
+            let searchInput = await page.$('input[placeholder*="类目关键词"], input[placeholder*="搜索分类"]');
+            if (!searchInput) {
+                searchInput = await page.evaluateHandle(() => {
+                    const isGlobal = el => /mms-header/.test(el.className || '') || /搜索功能|订单|课程/.test(el.placeholder || '');
+                    const ins = [...document.querySelectorAll('input[type="text"], input:not([type])')]
+                        .filter(el => el.offsetParent !== null && !isGlobal(el));
+                    const hit = ins.find(el => /类目|分类|关键词/.test(el.placeholder || '')) || ins[0];
+                    return hit || null;
+                }).then(h => h.asElement());
+            }
             if (searchInput) {
                 const keyword = category.split('>').pop().trim();
                 await searchInput.click({ force: true });
@@ -411,12 +448,23 @@ async function main() {
                     }
                 }
                 await page.waitForTimeout(1500);
+                if (!clicked) {
+                    // 兜底也没点中：检查搜索结果区是否真有可选项，没有就明确报错（避免点"下一步"触发拼多多"请先选择分类"）
+                    log('⚠ 类目关键词「' + keyword + '」未匹配到可点击的叶子分类。请确认软件里选的末级品类名与拼多多类目搜索结果一致。');
+                }
+            } else {
+                log('⚠ 未找到拼多多类目搜索框，页面可能改版');
             }
             // 点击确认/下一步按钮
             const confirmBtn = await page.$('button:has-text("确认发布"), button:has-text("确认"), button:has-text("下一步")');
             if (confirmBtn) {
                 await confirmBtn.click({ force: true });
                 await page.waitForTimeout(2000);
+                // 点完后若拼多多弹「请先选择分类」，说明类目没真正选中——明确报错中断，不要继续走下去
+                const needCat = await page.evaluate(() => document.body.innerText.includes('请先选择分类') || document.body.innerText.includes('请选择分类'));
+                if (needCat) {
+                    throw new Error('类目未选中：拼多多提示「请先选择分类」。请检查软件里所选末级品类名是否与拼多多类目库一致（当前关键词：' + (category.split('>').pop().trim()) + '）');
+                }
             }
         }
         progress(20, '类目选择完成');

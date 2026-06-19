@@ -65,6 +65,15 @@ dir /b "tools\browsers\chromium-*" > nul 2>&1
 if errorlevel 1 ( echo  [ERROR] tools\browsers Chromium missing. Run: cd tools ^&^& npx playwright install chromium & pause & exit /b 1 )
 echo        node.exe / playwright / chromium OK
 
+rem ---- 4.5/6 VC++ 运行库安装器（随包带，客户机缺运行库时启动自检静默安装）----
+if not exist "tools\vc_redist.x64.exe" (
+    echo [4.5/6] downloading vc_redist.x64.exe ...
+    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile 'tools\vc_redist.x64.exe' -UseBasicParsing } catch { exit 1 }"
+    if not exist "tools\vc_redist.x64.exe" ( echo  [WARN] vc_redist 下载失败，跳过随包（客户机需手动装VC++运行库）。 )
+) else (
+    echo [4.5/6] vc_redist.x64.exe 已存在
+)
+
 rem ---- 5/6 embedded JRE (jlink) ----
 if exist "dist\runtime\bin\java.exe" (
     echo [5/6] reusing existing dist\runtime

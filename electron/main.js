@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs   = require('fs');
@@ -17,6 +17,46 @@ let javaProcess = null;
 function res(...parts) {
     const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', 'dist');
     return path.join(base, ...parts);
+}
+
+/**
+ * 启动自检：Chromium/Java 依赖 VC++ 运行库（缺则 0xC0000135 崩溃）。
+ * 检测缺失 → 用随包带的 vc_redist.x64.exe 静默安装 → 装完删掉安装器省空间。
+ * 仅 Windows、仅打包态执行；失败不阻断启动（最坏退回原报错）。
+ */
+async function ensureVcRuntime() {
+    if (process.platform !== 'win32' || !app.isPackaged) return;
+    // 检测：System32 下有 vcruntime140.dll 即视为已装
+    const sys32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+    const installed = fs.existsSync(path.join(sys32, 'vcruntime140.dll'))
+                   && fs.existsSync(path.join(sys32, 'vcruntime140_1.dll'));
+    if (installed) return;
+    const installer = res('vc_redist.x64.exe');
+    if (!fs.existsSync(installer)) { console.warn('缺 VC++ 运行库且未随包带安装器，跳过'); return; }
+    try {
+        const win = new BrowserWindow({ width: 420, height: 160, resizable: false, title: '首次运行环境配置',
+            webPreferences: { nodeIntegration: false } });
+        win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
+            '<body style="font-family:Microsoft YaHei;padding:24px;color:#333;">正在安装运行环境（VC++ 运行库），请稍候，可能需要管理员授权…</body>'));
+        // 静默安装（/install /quiet /norestart）；需要管理员权限会弹 UAC
+        execFileSync(installer, ['/install', '/quiet', '/norestart'], { timeout: 180000 });
+        try { win.close(); } catch (_) {}
+        // 装完删掉安装器省空间
+        try { fs.unlinkSync(installer); } catch (_) {}
+        console.log('VC++ 运行库安装完成');
+    } catch (e) {
+        // exitCode 3010=需重启完成、1638=已装更高版本，都视为成功
+        const code = e && e.status;
+        if (code === 3010 || code === 1638 || code === 0) {
+            try { fs.unlinkSync(installer); } catch (_) {}
+        } else {
+            console.error('VC++ 运行库安装失败:', e.message);
+            try {
+                dialog.showMessageBoxSync({ type: 'warning', title: '环境提示',
+                    message: '运行环境（VC++ 运行库）未能自动安装。\n若软件无法生成图片或打开浏览器，请手动安装：\n' + installer });
+            } catch (_) {}
+        }
+    }
 }
 
 function prefFile() { return path.join(app.getPath('userData'), 'pref.json'); }
@@ -116,6 +156,7 @@ ipcMain.handle('pick-dir', async (_e, defaultPath) => {
 
 app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
+    await ensureVcRuntime();   // 首次运行自检/安装 VC++ 运行库（缺则 Chromium/Java 崩溃）
     await startJava();
     try { await waitForServer(); } catch (e) { console.error(e.message); }
     createMain();
