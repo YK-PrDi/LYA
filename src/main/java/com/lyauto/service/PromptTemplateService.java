@@ -75,4 +75,67 @@ public class PromptTemplateService {
         }
         return null;
     }
+
+    /**
+     * 取某模板可用的基准图，优先级：
+     * 1) 模板手填的 baseImg 绝对路径
+     * 2) 内置基准图（classpath assets/base/<模板名>.png|jpg，按模板名自动匹配，落地用户目录）
+     * 3) 运行时缓存（sku-base/<templateId>.jpg，当批生成的首张）
+     * 都没有返回 null（需当批生成首张作基准）。
+     */
+    public File resolveBaseImg(Map<String, Object> tpl) {
+        if (tpl == null) return null;
+        Object bi = tpl.get("baseImg");
+        if (bi instanceof String && !((String) bi).isBlank()) {
+            File f = new File((String) bi);
+            if (f.isFile()) return f;
+        }
+        // 按模板名自动匹配内置基准图
+        File builtin = builtinBaseByName(String.valueOf(tpl.get("name")));
+        if (builtin != null) return builtin;
+        File cache = baseCacheFile(String.valueOf(tpl.get("id")));
+        return cache.isFile() ? cache : null;
+    }
+
+    /** 内置基准图：classpath assets/base/<模板名>.(png|jpg) 落地到用户目录。找不到返回 null。 */
+    public File builtinBaseByName(String name) {
+        if (name == null || name.isBlank()) return null;
+        for (String ext : new String[]{".png", ".jpg"}) {
+            String res = "assets/base/" + name + ext;
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(res)) {
+                if (is == null) continue;
+                File f = new File(appProperties.getPaths().getUserDataDir(), "sku-base/builtin/" + name + ext);
+                if (!f.isFile()) { f.getParentFile().mkdirs(); Files.write(f.toPath(), is.readAllBytes()); }
+                return f;
+            } catch (Exception e) { log.warn("内置基准图落地失败({}): {}", res, e.getMessage()); }
+        }
+        return null;
+    }
+
+    /** 拆解结构参考图（classpath assets/explode-ref.jpg），供拆解类模板锁定内部结构。 */
+    public File explodeRefFile() {
+        try {
+            File f = new File(appProperties.getPaths().getUserDataDir(), "sku-base/explode-ref.jpg");
+            if (f.isFile()) return f;
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream("assets/explode-ref.jpg")) {
+                if (is == null) return null;
+                f.getParentFile().mkdirs(); Files.write(f.toPath(), is.readAllBytes());
+            }
+            return f;
+        } catch (Exception e) { log.warn("拆解参考图落地失败: {}", e.getMessage()); return null; }
+    }
+
+    /** 基准图缓存文件路径：userDataDir/sku-base/<templateId>.jpg */
+    public File baseCacheFile(String templateId) {
+        return new File(appProperties.getPaths().getUserDataDir(), "sku-base/" + templateId + ".jpg");
+    }
+
+    /** 把生成的基准图写入缓存目录，供同模板后续 SKU 复用。 */
+    public void saveBaseCache(String templateId, File img) {
+        try {
+            File dst = baseCacheFile(templateId);
+            dst.getParentFile().mkdirs();
+            Files.copy(img.toPath(), dst.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) { log.warn("基准图缓存失败({}): {}", templateId, e.getMessage()); }
+    }
 }

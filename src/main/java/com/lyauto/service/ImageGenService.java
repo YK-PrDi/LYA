@@ -64,6 +64,20 @@ public class ImageGenService {
     private static boolean hasHose(String d) { return d != null && (d.contains("软管") || d.contains("水管")); }
     private static boolean hasBase(String d) { return d != null && (d.contains("底座") || d.contains("支架") || d.contains("挂座")); }
 
+    /** 拼配件横幅信息：用配件文件名（含 1.5米/2米 软管区分）+ 滤芯数量，写进图生图指令。 */
+    private static String buildAccInfo(List<File> accFiles, java.util.List<String> accLabels, int filterShow) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        for (int i = 0; i < accFiles.size(); i++) {
+            String label = accLabels.get(i);
+            String nm = accFiles.get(i).getName().replaceAll("\\.[^.]+$", "");
+            if ("滤芯".equals(label)) parts.add(filterShow + "支滤芯");
+            else if ("软管".equals(label)) parts.add(nm.contains("2米") ? "2米软管" : (nm.contains("1.5") ? "1.5米软管" : "软管"));
+            else if ("底座".equals(label)) parts.add("底座");
+            else parts.add(nm);
+        }
+        return parts.isEmpty() ? "无配件" : String.join(" / ", parts);
+    }
+
     /**
      * 由款式名（compDesc）决定花洒左侧构图：配件/批量件做成「圆角矩形白底展示卡」——
      * 卡片中上部展示配件、卡片最底部是一条与场景背景同色的横幅、横幅内写该配件信息。
@@ -217,6 +231,7 @@ public class ImageGenService {
             ? templateService.findById(templateId) : null;
         boolean aiTemplate = tpl != null && "ai".equalsIgnoreCase(String.valueOf(tpl.get("type")));
         boolean stickerMode = !aiTemplate;  // 非 ai 模板（含默认/sticker）都走贴图合成
+        String cacheBaseForTemplate = null;  // 非空＝本次生成的图要缓存为该模板的基准图
 
         int filterCount = parseFilterCount(compDesc);
         String filterConstraint = filterCount > 0
@@ -405,18 +420,42 @@ public class ImageGenService {
                 } catch (Exception e) { log.warn("背景风格提取失败: {}", e.getMessage()); }
             }
             if (aiTemplate) {
-                // 纯AI模板：用模板 prompt 整图生成，传本色白底图锁色 + 主图背景参考，不贴图
-                String tplPrompt = String.valueOf(tpl.getOrDefault("prompt", ""));
-                prompt = tplPrompt
-                    .replace("{{bgStyle}}",   bgStyle)
-                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+                // 纯AI模板：基准图复用 + 图生图替换。有基准图→以它为底只换花洒/滤芯/背景；无→用 prompt 生成首张并缓存为基准。
+                String colorNm = skuName == null ? "" : skuName;
+                String accInfo = buildAccInfo(accFiles, accLabels, filterShow);
+                File baseImg = templateService.resolveBaseImg(tpl);
                 refs.clear();
-                if (hasWhiteBg) refs.add(whiteBgRef);
-                if (hasRef) refs.add(ref);
-                // 人像模板：附上人像白底图参考，让模型把人像手里的花洒换成本款
-                if (Boolean.TRUE.equals(tpl.get("usePortraitImg"))) {
-                    File portrait = portraitRefFile();
-                    if (portrait != null && portrait.isFile()) refs.add(portrait);
+                if (baseImg != null && baseImg.isFile()) {
+                    // 图生图：基准图打底（放第一张，权重最高）+ 本色花洒白底图 +（拆解类）滤芯 +（瀑布类）主图背景
+                    String edit = String.valueOf(tpl.getOrDefault("editInstruction", tpl.getOrDefault("prompt", "")));
+                    prompt = edit.replace("{{colorName}}", colorNm)
+                                 .replace("{{bgStyle}}", bgStyle)
+                                 .replace("{{accInfo}}", accInfo);
+                    refs.add(baseImg);
+                    if (hasWhiteBg) refs.add(whiteBgRef);
+                    for (int k = 0; k < accFiles.size(); k++) if ("滤芯".equals(accLabels.get(k))) refs.add(accFiles.get(k));
+                    if (Boolean.TRUE.equals(tpl.get("useExplodeRef"))) {
+                        File er = templateService.explodeRefFile();
+                        if (er != null && er.isFile()) refs.add(er);  // 拆解结构参考，锁内部结构
+                    }
+                    if (Boolean.TRUE.equals(tpl.get("useMainBg")) && hasRef) refs.add(ref);
+                    if (Boolean.TRUE.equals(tpl.get("usePortraitImg"))) {
+                        File portrait = portraitRefFile();
+                        if (portrait != null && portrait.isFile()) refs.add(portrait);
+                    }
+                } else {
+                    // 无基准图：用 prompt 整图生成，生成后缓存为该模板基准图（供后续 SKU 复用）
+                    String tplPrompt = String.valueOf(tpl.getOrDefault("prompt", ""));
+                    prompt = tplPrompt.replace("{{bgStyle}}", bgStyle)
+                                      .replace("{{colorName}}", colorNm)
+                                      .replace("{{accInfo}}", accInfo);
+                    if (hasWhiteBg) refs.add(whiteBgRef);
+                    if (hasRef) refs.add(ref);
+                    if (Boolean.TRUE.equals(tpl.get("usePortraitImg"))) {
+                        File portrait = portraitRefFile();
+                        if (portrait != null && portrait.isFile()) refs.add(portrait);
+                    }
+                    cacheBaseForTemplate = String.valueOf(tpl.get("id"));  // 标记：生成后缓存为基准
                 }
             } else {
                 String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
@@ -472,6 +511,10 @@ public class ImageGenService {
                     } catch (Exception ce) {
                         log.warn("花洒左侧合成失败，返回纯主图: {}", ce.getMessage());
                     }
+                }
+                // 纯AI模板无基准图时，把这张生成图缓存为该模板基准图，供同模板后续 SKU 图生图复用
+                if (cacheBaseForTemplate != null) {
+                    try { templateService.saveBaseCache(cacheBaseForTemplate, out); } catch (Exception ce) { log.warn("基准图缓存失败: {}", ce.getMessage()); }
                 }
                 return out.getAbsolutePath();
             } catch (Exception e) {

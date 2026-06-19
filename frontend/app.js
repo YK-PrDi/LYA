@@ -461,8 +461,28 @@ function tplRenderList(list) {
                 <label style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:3px;"><input type="checkbox" ${t.hasPortrait?'checked':''} onchange="siTemplates[${i}].hasPortrait=this.checked"> 人像</label>
                 <button onclick="tplDel(${i})" style="font-size:0.66rem;padding:2px 8px;border:1px solid #ef4444;border-radius:5px;background:transparent;color:#ef4444;cursor:pointer;">删</button>
             </div>
-            <textarea oninput="siTemplates[${i}].prompt=this.value" placeholder="${t.type==='sticker'?'贴图模板无需提示词':'提示词，可用 {{colorName}} {{bgStyle}}'}" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.73rem;resize:vertical;">${ecEscAttr(t.prompt||'')}</textarea>
+            <textarea oninput="siTemplates[${i}].prompt=this.value" placeholder="${t.type==='sticker'?'贴图模板无需提示词':'首张生成提示词，可用 {{colorName}} {{bgStyle}}'}" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.73rem;resize:vertical;">${ecEscAttr(t.prompt||'')}</textarea>
+            ${t.type==='ai' ? `
+            <textarea oninput="siTemplates[${i}].editInstruction=this.value" placeholder="图生图替换指令（以基准图为底，只换花洒/滤芯/背景）。可用 {{colorName}} {{bgStyle}} {{accInfo}}" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:0.73rem;resize:vertical;background:#fafafa;">${ecEscAttr(t.editInstruction||'')}</textarea>
+            <div style="display:flex;gap:6px;align-items:center;font-size:0.7rem;color:var(--text-muted);">
+                <span>基准图：</span>
+                <input value="${ecEscAttr(t.baseImg||'')}" oninput="siTemplates[${i}].baseImg=this.value" placeholder="留空=首张自动生成并缓存；或填精修基准图路径" style="flex:1;padding:3px 6px;border:1px solid var(--border);border-radius:5px;font-size:0.7rem;">
+                <button onclick="tplPickBase(${i})" style="font-size:0.64rem;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;">选图</button>
+                ${t.baseImg ? `<button onclick="siTemplates[${i}].baseImg='';tplRenderList(siTemplates)" style="font-size:0.64rem;padding:2px 6px;border:1px solid #ef4444;border-radius:5px;background:transparent;color:#ef4444;cursor:pointer;">清除</button>` : ''}
+            </div>
+            ${t.baseImg ? `<img src="/api/image?path=${encodeURIComponent(t.baseImg)}" style="max-width:120px;max-height:120px;border-radius:6px;border:1px solid var(--border);">` : ''}` : ''}
         </div>`).join('') || '<div style="color:var(--text-dim);font-size:0.78rem;text-align:center;padding:20px;">暂无模板，点下方新增</div>';
+}
+
+// 选基准图（electron 选文件，否则手填路径）
+async function tplPickBase(i) {
+    let p = '';
+    if (window.electronAPI && typeof window.electronAPI.pickFile === 'function') {
+        try { p = await window.electronAPI.pickFile(); } catch (_) {}
+    } else {
+        p = prompt('请输入基准图的完整路径：', siTemplates[i]?.baseImg || '');
+    }
+    if (p) { siTemplates[i].baseImg = p; tplRenderList(siTemplates); }
 }
 
 function tplAdd() {
@@ -572,18 +592,33 @@ async function siGenerate() {
             siRefreshCell(i);
         };
 
-        // 并发池：同时最多 CONC 张，每完成一张更新进度条（既提速又有实时进度）
-        // Tier 1 下 Nano Banana Pro RPM=20，6 并发稳妥（留余量防偶发 429）；要更快可调 8。
+        // 防比价 ai 模板用「基准图复用」：先单独跑第一张生成并缓存基准图，
+        // 再并发跑其余 SKU（都以基准图做图生图替换），保证同批结构一致、不race。
+        const isAiTpl = templateId && (siTemplates.find(t => t.id === templateId)?.type === 'ai');
         const CONC = 6;
-        let next = 0, done = 0;
-        await Promise.all(Array.from({ length: Math.min(CONC, total) }, async () => {
-            while (next < total) {
-                const cur = next++;
-                await genOne(cur);
-                done++;
-                siRenderProgress(done, total, tplName);
-            }
-        }));
+        let done = 0;
+        if (isAiTpl && total > 1) {
+            await genOne(0); done++; siRenderProgress(done, total, tplName);
+            let next = 1;
+            await Promise.all(Array.from({ length: Math.min(CONC, total - 1) }, async () => {
+                while (next < total) {
+                    const cur = next++;
+                    await genOne(cur);
+                    done++;
+                    siRenderProgress(done, total, tplName);
+                }
+            }));
+        } else {
+            let next = 0;
+            await Promise.all(Array.from({ length: Math.min(CONC, total) }, async () => {
+                while (next < total) {
+                    const cur = next++;
+                    await genOne(cur);
+                    done++;
+                    siRenderProgress(done, total, tplName);
+                }
+            }));
+        }
         siRenderProgress(total, total, tplName);
     } catch (e) {
         box.innerHTML = `<div style="color:#dc2626;padding:20px;font-size:0.82rem;">生成失败：${ecEscAttr(e.message)}</div>`;
