@@ -12,6 +12,7 @@ public class AppProperties {
     private Auth auth = new Auth();
     private Kuaimai kuaimai = new Kuaimai();
     private GptImage gptImage = new GptImage();
+    private TextGen text = new TextGen();
 
     public Volcengine getVolcengine() { return volcengine; }
     public void setVolcengine(Volcengine volcengine) { this.volcengine = volcengine; }
@@ -23,6 +24,8 @@ public class AppProperties {
     public void setKuaimai(Kuaimai kuaimai) { this.kuaimai = kuaimai; }
     public GptImage getGptImage() { return gptImage; }
     public void setGptImage(GptImage gptImage) { this.gptImage = gptImage; }
+    public TextGen getText() { return text; }
+    public void setText(TextGen text) { this.text = text; }
 
     public static class Volcengine {
         private String apiKey;
@@ -72,8 +75,7 @@ public class AppProperties {
         public void setRefreshToken(String refreshToken) { this.refreshToken = refreshToken; }
     }
 
-    public static class GptImage {
-        /** provider: gemini | openai（openai 走 gpt-image-2） */
+    public static class GptImage {        /** provider: gemini | openai（openai 走 gpt-image-2） */
         private String provider = "gemini";
         /** Gemini: https://generativelanguage.googleapis.com ; OpenAI: https://api.linapi.net */
         private String baseUrl = "https://generativelanguage.googleapis.com";
@@ -134,5 +136,25 @@ public class AppProperties {
             }
             return out;
         }
+    }
+
+    /**
+     * 文本/多模态生成（标题、款式名）。与生图配置解耦。
+     * 默认走阿里云百炼 DashScope（OpenAI 兼容模式），用 qwen-vl-plus（支持传图+文字生文字，有免费额度）。
+     */
+    public static class TextGen {
+        /** OpenAI 兼容的 chat/completions 基址 */
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        /** 文本/多模态模型名 */
+        private String model = "qwen-vl-plus";
+        /** API Key */
+        private String apiKey = "";
+
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+        public String getApiKey() { return apiKey; }
+        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
     }
 }

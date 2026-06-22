@@ -254,20 +254,7 @@
       <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:6px;">选一张主图作参考（AI 会参考其外观风格逐个生成 SKU 展示图）：</div>
       <div id="siRefThumbs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
       <input type="hidden" id="siRefPath">
-      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;">
-        <span style="font-size:0.74rem;color:var(--text-dim);">防比价构图：</span>
-        <div class="gf-select" style="min-width:200px;">
-          <input type="hidden" id="siTemplate" value="">
-          <div class="gf-select-trigger" onclick="toggleSelect(this,event)">
-            <span class="gf-select-text" id="siTemplateText">🎲 随机一种</span>
-          </div>
-          <div class="gf-options" id="siTemplateOptions"></div>
-        </div>
-        <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
-          <input type="checkbox" id="siExcludePortrait" checked> 排除人像
-        </label>
-        <button type="button" onclick="openTplEditor()" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">⚙️ 编辑模板</button>
-      </div>
+      <div style="font-size:0.7rem;color:var(--text-dim);margin-top:8px;">防比价构图、排除人像等可在右上角 ⚙️ 设置里调整。</div>
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 20px;">
       <div id="siContent" style="min-height:160px;">
@@ -308,6 +295,24 @@
         <div style="font-size:0.78rem;font-weight:600;margin-bottom:6px;">配件搭配规则</div>
         <button onclick="openRuleEditor()" style="font-size:0.74rem;padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;">📋 编辑规则库</button>
         <div style="font-size:0.68rem;color:var(--text-dim);margin-top:4px;">全自动模式下，按此规则把"只选的主件"扩展成配件/批量件搭配。</div>
+      </div>
+      <div>
+        <div style="font-size:0.78rem;font-weight:600;margin-bottom:6px;">防比价构图</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div class="gf-select" style="min-width:200px;">
+            <input type="hidden" id="siTemplate" value="">
+            <div class="gf-select-header" onclick="toggleSelect(this,event)">
+              <span class="gf-select-text" id="siTemplateText">🎲 随机一种</span>
+              <svg class="gf-select-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="gf-select-options" id="siTemplateOptions"></div>
+          </div>
+          <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="siExcludePortrait" checked> 排除人像
+          </label>
+          <button type="button" onclick="openTplEditor()" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">⚙️ 编辑模板</button>
+        </div>
+        <div style="font-size:0.68rem;color:var(--text-dim);margin-top:4px;">生成 SKU 图时使用的构图模式；选「随机」则每批随机一种。</div>
       </div>
     </div>
     <div class="modal-footer">

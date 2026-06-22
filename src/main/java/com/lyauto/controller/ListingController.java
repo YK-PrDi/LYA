@@ -143,7 +143,9 @@ public class ListingController {
             List<String> accImagePaths = (List<String>) body.getOrDefault("accImagePaths", List.of());
             List<Map<String, Object>> skus = (List<Map<String, Object>>) body.getOrDefault("skus", List.of());
             String templateId = (String) body.getOrDefault("templateId", "");  // 防比价模板（整批统一）
-            String batch = String.valueOf(System.currentTimeMillis());
+            // 批次号：前端整批生图传同一个 batch，使所有 SKU 落到同一 sku-gen/<batch>/ 文件夹；没传才用当前时间
+            String batch = String.valueOf(body.getOrDefault("batch", ""));
+            if (batch == null || batch.isBlank() || "null".equals(batch)) batch = String.valueOf(System.currentTimeMillis());
 
             // 同批共享背景：优先用前端传入的 bgStyle（前端整批只分析一次再分发，保证并发各 SKU 背景一致）；
             // 没传则后端自行分析一次。

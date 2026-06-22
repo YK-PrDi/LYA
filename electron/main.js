@@ -108,8 +108,15 @@ async function startJava() {
             IMG_BASE_URL: secret.IMG_BASE_URL || '',
             IMG_MODEL: secret.IMG_MODEL || '',
             IMG_KEYS: secret.IMG_KEYS || '',
+            GPT_IMAGE_KEY_1: secret.GPT_IMAGE_KEY_1 || '',
+            GPT_IMAGE_KEY_2: secret.GPT_IMAGE_KEY_2 || '',
+            GPT_IMAGE_KEY_3: secret.GPT_IMAGE_KEY_3 || '',
+            GPT_IMAGE_KEY_4: secret.GPT_IMAGE_KEY_4 || '',
             IMG_PROXY_HOST: secret.IMG_PROXY_HOST || '',
             IMG_PROXY_PORT: secret.IMG_PROXY_PORT || '',
+            TEXT_BASE_URL: secret.TEXT_BASE_URL || '',
+            TEXT_MODEL: secret.TEXT_MODEL || '',
+            TEXT_API_KEY: secret.TEXT_API_KEY || '',
         },
     });
     javaProcess.on('error', err => console.error('Java 启动失败:', err.message));

@@ -352,19 +352,35 @@ function closeSkuImgModal() { document.getElementById('skuImgModal')?.classList.
 function lyGetSettings() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem('lySettings') || '{}') || {}; } catch (_) {}
-    return { mode: s.mode || 'manual', planMode: s.planMode || '1' };
+    return {
+        mode: s.mode || 'manual',
+        planMode: s.planMode || '1',
+        template: s.template || '',
+        excludePortrait: s.excludePortrait !== false,  // 默认 true
+    };
 }
-function openSettingsModal() {
+async function openSettingsModal() {
     const s = lyGetSettings();
     document.querySelectorAll('input[name="setMode"]').forEach(r => r.checked = (r.value === s.mode));
     document.querySelectorAll('input[name="setPlan"]').forEach(r => r.checked = (r.value === s.planMode));
+    const exP = document.getElementById('siExcludePortrait'); if (exP) exP.checked = s.excludePortrait;
+    const tpl = document.getElementById('siTemplate'); if (tpl) tpl.value = s.template;
+    if (!siTemplates.length) await siLoadTemplates();  // 设置面板可能先于生图弹窗打开，确保模板已加载
+    siRenderTemplateOptions();
+    const txt = document.getElementById('siTemplateText');
+    if (txt) {
+        const t = siTemplates.find(x => x.id === s.template);
+        txt.textContent = t ? t.name + (t.type === 'sticker' ? '（贴图）' : '') : '🎲 随机一种';
+    }
     document.getElementById('settingsModal')?.classList.add('show');
 }
 function closeSettingsModal() { document.getElementById('settingsModal')?.classList.remove('show'); }
 function saveSettings() {
     const mode = document.querySelector('input[name="setMode"]:checked')?.value || 'manual';
     const planMode = document.querySelector('input[name="setPlan"]:checked')?.value || '1';
-    localStorage.setItem('lySettings', JSON.stringify({ mode, planMode }));
+    const template = document.getElementById('siTemplate')?.value || '';
+    const excludePortrait = document.getElementById('siExcludePortrait')?.checked !== false;
+    localStorage.setItem('lySettings', JSON.stringify({ mode, planMode, template, excludePortrait }));
     closeSettingsModal();
     alert('设置已保存：' + (mode === 'auto' ? '全自动' : '人工') + '模式，' + (planMode === '1' ? '1 套' : '多套'));
 }
@@ -405,9 +421,11 @@ async function siLoadTemplates() {
     siRenderTemplateOptions();
 }
 
-// 按"排除人像"过滤后的可用模板
+// 按"排除人像"过滤后的可用模板。优先读界面勾选框的实时状态（设置弹窗里改了即时反映），
+// 弹窗未渲染该框时（如批量生成时）回退到已保存设置。
 function siAvailableTemplates() {
-    const exP = document.getElementById('siExcludePortrait')?.checked;
+    const box = document.getElementById('siExcludePortrait');
+    const exP = box ? box.checked : lyGetSettings().excludePortrait;
     return siTemplates.filter(t => !(exP && t.hasPortrait));
 }
 
@@ -433,8 +451,8 @@ document.addEventListener('change', (e) => {
 
 // 整批确定一个 templateId：手选则用所选；选"随机"则从可用模板里随机抽一个
 function siPickBatchTemplate() {
-    const chosen = document.getElementById('siTemplate')?.value || '';
-    if (chosen) return chosen;
+    const chosen = lyGetSettings().template || '';
+    if (chosen && siAvailableTemplates().some(t => t.id === chosen)) return chosen;
     const pool = siAvailableTemplates();
     if (!pool.length) return '';
     return pool[Math.floor(Math.random() * pool.length)].id;
@@ -545,6 +563,8 @@ async function siGenerate() {
         // 整批确定一个防比价模板（手选或随机），所有 SKU 用同一个
         const templateId = siPickBatchTemplate();
         const tplName = templateId ? (siTemplates.find(t => t.id === templateId)?.name || templateId) : '';
+        // 整批共享一个批次号，所有 SKU 图落到同一 sku-gen/<batch>/ 文件夹
+        const batchId = 'b' + Date.now();
 
         // 初始化所有格子为"生成中"，并渲染进度条 + 网格
         siGenImages = lstSkuItems.map((s, i) => ({ idx: i, name: siSkuFullName(s), loading: true }));
@@ -557,7 +577,7 @@ async function siGenerate() {
         const genOne = async (i) => {
             const s = lstSkuItems[i];
             const reqBody = JSON.stringify({
-                refImagePath: ref, productType, bagImagePath, accImagePaths, waterImagePath, bgStyle, templateId,
+                refImagePath: ref, productType, bagImagePath, accImagePaths, waterImagePath, bgStyle, templateId, batch: batchId,
                 skus: [{ idx: i, name: siSkuFullName(s), compDesc: siSkuFullName(s), itemCode: s.itemCode || '', accParts: s.accParts || [], whiteImgPath: s.whiteImgDir || '' }]
             });
             let lastErr = '失败';
@@ -867,7 +887,7 @@ async function lyAutoRun() {
             ladders.forEach(ld => {
                 const parts = (ld.components || []).map(c => {
                     const a = accByKw[c.match]; if (!a) return null;
-                    return { code: a.itemCode, qty: c.qty || a.defaultQty || 1 };
+                    return { code: a.itemCode, qty: c.qty || a.defaultQty || 1, kw: c.match };
                 }).filter(Boolean);
                 const codeStr = [main.itemCode].concat(parts.map(p => p.qty > 1 ? `${p.code}*${p.qty}` : p.code)).join('+');
                 items.push({
@@ -1143,6 +1163,15 @@ function spItemByCode(code) {
     return lstSkuItems.find(s => (s.itemCode || s.name) === code) || null;
 }
 
+// 从配件编码反推关键字（软管/底座/滤芯）——优先看商品名，再看编码本身，供生图按关键字匹配白底图
+function spAccKw(code) {
+    const nm = (spItemByCode(code)?.name || '') + ' ' + (code || '');
+    if (nm.includes('软管')) return '软管';
+    if (nm.includes('滤芯')) return '滤芯';
+    if (nm.includes('底座') || nm.includes('支架') || nm.includes('挂座')) return '底座';
+    return '';
+}
+
 // 滤芯识别：名称含"滤芯"才允许调数量
 function spIsFilter(name) {
     return typeof name === 'string' && name.includes('滤芯');
@@ -1346,8 +1375,8 @@ async function spConfirm() {
             name: s.name, cost: parseFloat(s.cost) || 0, stock: s.stock || 8888,
             itemCode: cells[i]?.itemCode || '',
             spec1: cells[i]?.spec1 || '', spec2: cells[i]?.spec2 || '',
-            // 配件码清单（来自前面选的型号 components，去掉主件；保留 code+qty 供生图贴图用）
-            accParts: ((cells[i]?.components) || []).slice(1).map(c => ({ code: c.itemCode, qty: c.qty || 1 }))
+            // 配件码清单（来自前面选的型号 components，去掉主件；保留 code+qty+kw 供生图贴图匹配白底图用）
+            accParts: ((cells[i]?.components) || []).slice(1).map(c => ({ code: c.itemCode, qty: c.qty || 1, kw: spAccKw(c.itemCode) }))
         })));
         closeSkuPlanModal();
     } catch (e) {

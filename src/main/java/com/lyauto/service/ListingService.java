@@ -22,10 +22,6 @@ public class ListingService {
     private final TaskService taskService;
     private final ImageGenService imageGenService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final OkHttpClient http = new OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .build();
 
     public ListingService(AppProperties appProperties, TaskService taskService, ImageGenService imageGenService) {
         this.appProperties = appProperties;
@@ -54,47 +50,15 @@ public class ListingService {
         );
 
         try {
-            String apiKey = appProperties.getVolcengine().getApiKey();
-            String baseUrl = appProperties.getVolcengine().getBaseUrl();
-            if (apiKey == null || apiKey.isBlank()) {
-                throw new RuntimeException("Volcengine API Key 未配置（VOLCENGINE_API_KEY）");
-            }
+            // 走统一文本模型（geminiText → 千问 qwen，配置解耦，不再用欠费的豆包账户）
+            String content = imageGenService.geminiText(prompt, null);
+            int start = content.indexOf('{');
+            int end = content.lastIndexOf('}');
+            if (start >= 0 && end > start) content = content.substring(start, end + 1);
 
-            // 调用豆包文本模型（chat completions 接口）
-            String requestBody = objectMapper.writeValueAsString(Map.of(
-                "model", "doubao-seed-2-0-lite-260215",
-                "messages", List.of(Map.of("role", "user", "content", prompt))
-            ));
-
-            Request req = new Request.Builder()
-                .url(baseUrl + "/chat/completions")
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
-                .build();
-
-            try (Response resp = http.newCall(req).execute()) {
-                String body = resp.body() != null ? resp.body().string() : "";
-                if (!resp.isSuccessful()) {
-                    throw new RuntimeException("API 调用失败 " + resp.code() + ": " + body);
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> respMap = objectMapper.readValue(body, Map.class);
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) respMap.get("choices");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                String content = (String) message.get("content");
-
-                // 提取 JSON
-                int start = content.indexOf('{');
-                int end = content.lastIndexOf('}');
-                if (start >= 0 && end > start) content = content.substring(start, end + 1);
-
-                @SuppressWarnings("unchecked")
-                Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
-                return parsed;
-            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = objectMapper.readValue(content, Map.class);
+            return parsed;
         } catch (Exception e) {
             log.error("AI 生成标题失败: {}", e.getMessage(), e);
             // 降级：返回简单拼接
@@ -718,37 +682,12 @@ public class ListingService {
             category, productName, brand, material, mainLines, accLines, batchLines
         );
 
-        String apiKey = appProperties.getVolcengine().getApiKey();
-        String baseUrl = appProperties.getVolcengine().getBaseUrl();
-        if (apiKey == null || apiKey.isBlank()) throw new RuntimeException("Volcengine API Key 未配置");
-
-        String requestBody = objectMapper.writeValueAsString(Map.of(
-            "model", "doubao-seed-2-0-lite-260215",
-            "messages", List.of(Map.of("role", "user", "content", prompt))
-        ));
-
-        Request httpReq = new Request.Builder()
-            .url(baseUrl + "/chat/completions")
-            .header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json")
-            .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
-            .build();
-
-        try (Response resp = http.newCall(httpReq).execute()) {
-            String body = resp.body() != null ? resp.body().string() : "";
-            if (!resp.isSuccessful()) throw new RuntimeException("API 调用失败 " + resp.code() + ": " + body);
-
-            Map<String, Object> respMap = objectMapper.readValue(body, Map.class);
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) respMap.get("choices");
-            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-            String content = (String) message.get("content");
-
-            int start = content.indexOf('{');
-            int end   = content.lastIndexOf('}');
-            if (start >= 0 && end > start) content = content.substring(start, end + 1);
-
-            return objectMapper.readValue(content, Map.class);
-        }
+        // 走统一文本模型（geminiText → 千问 qwen，配置解耦，不再用欠费的豆包账户）
+        String content = imageGenService.geminiText(prompt, null);
+        int start = content.indexOf('{');
+        int end   = content.lastIndexOf('}');
+        if (start >= 0 && end > start) content = content.substring(start, end + 1);
+        return objectMapper.readValue(content, Map.class);
     }
 
     private String getCellStr(org.apache.poi.ss.usermodel.Cell cell) {
