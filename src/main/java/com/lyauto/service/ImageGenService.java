@@ -235,6 +235,10 @@ public class ImageGenService {
         boolean openai = "openai".equalsIgnoreCase(cfg.getProvider());
         boolean isShower = productType != null && (productType.contains("花洒") || productType.contains("淋浴"));
 
+        // 纯颜色名：从 skuName 取首段（去【】后，遇 - / 空格 截断），用于左上色标等「只写颜色」处。
+        // 如「雅黑色-亲肤按摩 单品」→「雅黑色」、「【月光银】增压」→「月光银」。
+        String colorOnly = colorOf(skuName);
+
         // 防比价模板：templateId 指定则按它决定构图；sticker/空=贴图(现有逻辑)，ai=整图AI生成。
         Map<String, Object> tpl = (templateId != null && !templateId.isBlank())
             ? templateService.findById(templateId) : null;
@@ -413,7 +417,7 @@ public class ImageGenService {
             String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
             prompt = showerTemplate
                 .replace("{{bgStyle}}",   bgStyle)
-                .replace("{{colorName}}", skuName == null ? "" : skuName);
+                .replace("{{colorName}}", colorOnly);
 
             // 参考图：本色花洒白底图 + 袋子（配件/水质不传给 AI，左侧由合成贴图）
             List<File> showerRefs = new java.util.ArrayList<>();
@@ -474,7 +478,7 @@ public class ImageGenService {
             }
             if (aiTemplate) {
                 // 纯AI模板：基准图复用 + 图生图替换。有基准图→以它为底只换花洒/滤芯/背景；无→用 prompt 生成首张并缓存为基准。
-                String colorNm = skuName == null ? "" : skuName;
+                String colorNm = colorOnly;
                 String accInfo = buildAccInfo(accFiles, accLabels, filterShow);
                 // 按该 SKU 是否有配件，选「-有配件/-无配件」基准图变体
                 boolean hasAcc = !accFiles.isEmpty();
@@ -523,7 +527,7 @@ public class ImageGenService {
                 String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
                 prompt = showerTemplate
                     .replace("{{bgStyle}}",   bgStyle)
-                    .replace("{{colorName}}", skuName == null ? "" : skuName);
+                    .replace("{{colorName}}", colorOnly);
                 // AI 只画右侧主件+背景，左侧配件由 Java 合成贴图。
                 // 参考图：本色花洒白底图（锁颜色/样式）+ 袋子图 + 主图（背景参考）。配件/水质图不传给 AI。
                 refs.clear();
@@ -952,10 +956,10 @@ public class ImageGenService {
         boolean hasCard = !showImgs.isEmpty();
 
         if (hasCard) {
-            // 左中一张卡：固定 9:16（宽:高），垂直居中，左侧留边、与右侧袋子保持间距
-            int cardW = (int)(W * 0.30);
-            int cardH = (int)(cardW * 16.0 / 9.0);
-            int cardX = (int)(W * 0.07);
+            // 左中一张横向卡（4:3，宽>高），垂直居中，左侧留边、与右侧袋子保持间距
+            int cardW = (int)(W * 0.38);
+            int cardH = (int)(cardW * 3.0 / 4.0);
+            int cardX = (int)(W * 0.06);
             int cardY = (H - cardH) / 2;
             drawAccCard(g, cardX, cardY, cardW, cardH, showImgs, String.join(" / ", txts), 0, banner);
         }
@@ -1010,23 +1014,29 @@ public class ImageGenService {
         Color banner = darken(bgColor(bgRef, base), 0.6);
 
         if (drawCard) {
-            // 统一 9:16（宽:高）展示卡；位置按 region 决定
-            int cardW = (int)(W * 0.30);
-            int cardH = (int)(cardW * 16.0 / 9.0);
+            // 横向展示卡（宽 > 高，4:3）；位置按 region 决定
+            int cardW = (int)(W * 0.38);
+            int cardH = (int)(cardW * 3.0 / 4.0);
             int cx, cy;
+            // 底部通栏占底部约 12%，卡底锚定在通栏上方留 2% 间隙
+            int cardBottom = (int)(H * 0.86);
+            // 顶部安全线：左上文字带约占顶部 33%，卡顶不得越过此线（1024 下约 y=340）
+            int topSafe = (int)(H * 0.34);
             if ("left-bottom".equals(region)) {
-                cx = (int)(W * 0.06); cy = (int)(H * 0.84) - cardH;
+                cx = (int)(W * 0.05); cy = cardBottom - cardH;
             } else if ("left-mid-bottom".equals(region)) {
-                cx = (int)(W * 0.07); cy = (int)(H * 0.82) - cardH;
+                cx = (int)(W * 0.05); cy = cardBottom - cardH;
             } else if ("center".equals(region)) {
                 cx = (W - cardW) / 2; cy = (H - cardH) / 2;
-            } else { // right-center
-                cx = (int)(W * 0.60); cy = (H - cardH) / 2;
+            } else { // right-center：右侧中部偏上（避开右下人像、落在顶部文字下方）
+                cx = (int)(W * 0.56); cy = (int)(H * 0.30);
             }
-            // 防越界：卡底不超过底部 ~12% 通栏区
-            int maxBottom = (int)(H * 0.88);
-            if (cy + cardH > maxBottom) cy = maxBottom - cardH;
-            if (cy < (int)(H * 0.04)) cy = (int)(H * 0.04);
+            // 卡顶越过安全线则压缩卡高、保持卡底不动，确保不挡上方文字
+            if (cy < topSafe) {
+                cy = topSafe;
+                cardH = cardBottom - topSafe;
+                cardW = (int)(cardH * 4.0 / 3.0);
+            }
             java.util.List<String> txts = new java.util.ArrayList<>();
             for (int i = 0; i < items.size(); i++) txts.add(accDisplay(items.get(i), labels.get(i), 0));
             if (hasFilter) txts.add(filterDisplay(filterCount));
@@ -1116,6 +1126,21 @@ public class ImageGenService {
     /** 滤芯卡底条文案：过滤滤芯*N。 */
     private static String filterDisplay(int count) { return "过滤滤芯*" + count; }
 
+    /**
+     * 从 SKU 名提取纯颜色名：优先取【】中括号内容；否则取首段（遇 - / 空格 / + 截断）。
+     * 如「雅黑色-亲肤按摩 单品」→「雅黑色」、「【月光银】增压过滤」→「月光银」、「枪灰 一键止水」→「枪灰」。
+     */
+    private static String colorOf(String skuName) {
+        if (skuName == null) return "";
+        String s = skuName.trim();
+        if (s.isEmpty()) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[【\\[]([^】\\]]+)[】\\]]").matcher(s);
+        if (m.find()) return m.group(1).trim();
+        // 去掉可能的前导编码后，按 - 空格 + 截断取首段
+        String[] seg = s.split("[\\-\\s+]+");
+        return seg.length > 0 && !seg[0].isEmpty() ? seg[0].trim() : s;
+    }
+
     /** 采样左侧边缘像素求平均作为背景代表色（用于横幅同色）。 */
     private Color sampleBgColor(BufferedImage img) {
         int W = img.getWidth(), H = img.getHeight();
@@ -1154,22 +1179,40 @@ public class ImageGenService {
         int areaH = by - areaY - (int)(h * 0.04);
         int areaX = x + (int)(w * 0.04);
         int areaW = w - (int)(w * 0.08);
-        int n = repeat > 0 ? repeat : Math.max(1, accImgs.size());
-        // 网格自适应排布：按区域宽高比算列数，让所有配件都塞进框且尺寸合理（避免一行挤成细条）
-        int cols = (int)Math.ceil(Math.sqrt((double) n * areaW / Math.max(1, areaH)));
-        cols = Math.max(1, Math.min(cols, n));
-        int rows = (int)Math.ceil((double) n / cols);
-        int cellW = areaW / cols;
-        int cellH = areaH / rows;
-        for (int i = 0; i < n; i++) {
-            File src = repeat > 0 ? accImgs.get(0) : accImgs.get(i);
-            BufferedImage acc = whiteToTransparent(ImageIO.read(src));
+
+        // 按图片分组：底座/软管各一组(count=1)，滤芯同图合并成一组(count=N)。每组占一个横向格。
+        java.util.List<File> groupImg = new java.util.ArrayList<>();
+        java.util.List<Integer> groupCnt = new java.util.ArrayList<>();
+        if (repeat > 0 && !accImgs.isEmpty()) {           // 兼容旧调用：单图重复 repeat 份
+            groupImg.add(accImgs.get(0)); groupCnt.add(repeat);
+        } else {
+            for (File f : accImgs) {
+                int idx = groupImg.indexOf(f);
+                if (idx >= 0) groupCnt.set(idx, groupCnt.get(idx) + 1);
+                else { groupImg.add(f); groupCnt.add(1); }
+            }
+        }
+        int groups = Math.max(1, groupImg.size());
+        int slotW = areaW / groups;
+        for (int gi = 0; gi < groupImg.size(); gi++) {
+            BufferedImage acc = whiteToTransparent(ImageIO.read(groupImg.get(gi)));
             if (acc == null) continue;
-            int r = i / cols, c = i % cols;
-            int cellX = areaX + c * cellW, cellY = areaY + r * cellH;
-            // 每格留 3% 小内边距，配件尽量填满格子（放大、贴合并排），不超出展示区
-            drawImageFit(g, acc, cellX + (int)(cellW * 0.03), cellY + (int)(cellH * 0.03),
-                         (int)(cellW * 0.94), (int)(cellH * 0.94));
+            int slotX = areaX + gi * slotW;
+            int cnt = groupCnt.get(gi);
+            if (cnt <= 1) {
+                // 单件（底座/软管）：填满该格、留 5% 边距
+                drawImageFit(g, acc, slotX + (int)(slotW * 0.05), areaY + (int)(areaH * 0.05),
+                             (int)(slotW * 0.90), (int)(areaH * 0.90));
+            } else {
+                // 多件（滤芯）：紧密并排，>5 支则换行叠放，组内铺满该格、几乎无间隙
+                int sub = (int)Math.ceil(Math.sqrt((double) cnt));      // 每行支数 ~√n
+                int rowsN = (int)Math.ceil((double) cnt / sub);
+                int iw = slotW / sub, ih = areaH / rowsN;
+                for (int k = 0; k < cnt; k++) {
+                    int rr = k / sub, cc = k % sub;
+                    drawImageFit(g, acc, slotX + cc * iw, areaY + rr * ih, iw, ih);
+                }
+            }
         }
 
         // 底条（加深背景色）+ 仅底部圆角

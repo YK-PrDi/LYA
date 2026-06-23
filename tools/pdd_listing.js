@@ -227,26 +227,27 @@ async function main() {
     }
 
     const cookiesPath = config.cookiesPath || path.join(process.cwd(), 'pdd_cookies.json');
+    // 持久化用户目录：cookie + localStorage + IndexedDB 全部留存，显著延长拼多多登录态。
+    // 优先用 config 指定，否则放在 cookiesPath 同目录下的 pdd_browser_profile/。
+    const userDataDir = config.userDataDir || path.join(path.dirname(cookiesPath), 'pdd_browser_profile');
+    try { fs.mkdirSync(userDataDir, { recursive: true }); } catch (_) {}
 
-    // 启动浏览器（始终有界面，拼多多防检测）
-    const browser = await chromium.launch({
+    // 启动持久化上下文（始终有界面，拼多多防检测）。登录态由用户目录自动持久化，无需手动存/灌 cookie。
+    const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
         args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
-    });
-
-    const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         viewport: { width: 1440, height: 900 },
     });
 
-    // 加载已有 cookies
+    // 兼容旧版：若存在旧的 pdd_cookies.json 且持久化目录还没登录态，迁移一次（仅首次有效）
     if (fs.existsSync(cookiesPath)) {
         try {
             const cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf8'));
             await context.addCookies(cookies);
-            log('已加载登录 cookies');
+            log('已从旧 pdd_cookies.json 迁移登录 cookies（之后由持久化目录维护）');
         } catch (e) {
-            log('cookies 加载失败，将重新登录: ' + e.message);
+            log('旧 cookies 迁移失败（忽略，将走登录）: ' + e.message);
         }
     }
 
@@ -295,7 +296,7 @@ async function main() {
             const cookies = await context.cookies();
             fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2));
             log('登录成功，cookies 已保存到: ' + cookiesPath);
-            if (loginOnly) { await browser.close(); done('login_saved'); return; }
+            if (loginOnly) { await context.close(); done('login_saved'); return; }
         }
 
         // ── STEP 1：进入发布新商品页 ────────────────────────────────────
@@ -1321,7 +1322,7 @@ async function main() {
         if (dryRun) {
             await page.screenshot({ path: 'step_final_before_submit.png' });
             log('dry-run 模式，截图已保存，不实际提交');
-            await browser.close();
+            await context.close();
             done('dry_run_complete');
             return;
         }
@@ -1355,19 +1356,34 @@ async function main() {
         await page.screenshot({ path: 'submit_result.png' }).catch(() => {});
         log('提交结果截图已保存: submit_result.png');
 
-        const isSuccess = submitResultUrl.includes('success') || submitResultUrl.includes('goods_list') || submitResultUrl.includes('goods/list');
-        const successEl = await page.$('[class*="success"], [class*="Success"], h2:has-text("成功"), div:has-text("发布成功"), div:has-text("提交成功")').catch(() => null);
+        // 严格判成功：URL 真正跳离编辑页（到 success/列表页），或出现明确的成功弹窗标题。
+        // 不再用宽松的 div:has-text("成功")（会误命中页面里任意含「成功」的文字 → 误报）。
+        const leftEditPage = !/goods_add|goods\/edit/.test(submitResultUrl) &&
+            (submitResultUrl.includes('success') || submitResultUrl.includes('goods_list') || submitResultUrl.includes('goods/list'));
+        const successModal = await page.$('.success-modal, [class*="successModal"], [class*="result-success"], [class*="publishSuccess"]').catch(() => null);
+        const isSuccess = leftEditPage || !!successModal;
 
-        if (isSuccess || successEl) {
+        if (isSuccess) {
             progress(100, '商品发布成功');
             const cookies = await context.cookies();
             fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2));
             done('success');
         } else {
-            const errEl = await page.$('[class*="error-count"], [class*="errorCount"]').catch(() => null);
-            const errText = errEl ? await errEl.textContent().catch(() => '') : '';
-            log('页面错误信息: ' + errText);
-            error('提交后未跳转到成功页面，当前 URL: ' + submitResultUrl + (errText ? '，错误: ' + errText : ''));
+            // 失败：把页面上的报错/红字/校验提示全部抓出来，便于定位真实原因
+            const errMsgs = await page.evaluate(() => {
+                const out = [];
+                const sel = '[class*="error"], [class*="Error"], [class*="errMsg"], [class*="invalid"], '
+                          + '[class*="toast"], [class*="Toast"], [class*="message"], [class*="Message"], '
+                          + '[class*="form-explain"], [class*="formExplain"], [aria-invalid="true"]';
+                document.querySelectorAll(sel).forEach(el => {
+                    const t = (el.textContent || '').trim();
+                    if (t && t.length < 80 && out.indexOf(t) < 0) out.push(t);
+                });
+                return out.slice(0, 20);
+            }).catch(() => []);
+            const joined = errMsgs.join(' | ');
+            log('页面报错/校验提示: ' + (joined || '(未抓到明确报错文字，请看 submit_result.png 截图)'));
+            error('上架未成功：提交后停留在编辑页(' + submitResultUrl + ')。页面提示: ' + (joined || '无，见 submit_result.png'));
         }
 
     } catch (e) {
@@ -1375,7 +1391,7 @@ async function main() {
         await page.screenshot({ path: 'error_screenshot.png' }).catch(() => {});
         error(e.message);
     } finally {
-        await browser.close();
+        await context.close();
     }
 }
 

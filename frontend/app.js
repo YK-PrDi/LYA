@@ -612,23 +612,11 @@ async function siGenerate() {
             siRefreshCell(i);
         };
 
-        // 防比价 ai 模板用「基准图复用」：先单独跑第一张生成并缓存基准图，
-        // 再并发跑其余 SKU（都以基准图做图生图替换），保证同批结构一致、不race。
-        const isAiTpl = templateId && (siTemplates.find(t => t.id === templateId)?.type === 'ai');
+        // 所有 ai 模板均已内置基准图（assets/base/ 有/无配件两版），无需再「串行先生成首张作基准」，
+        // 直接全批并发图生图，省掉首张 4~5 分钟前置。
         const CONC = 6;
         let done = 0;
-        if (isAiTpl && total > 1) {
-            await genOne(0); done++; siRenderProgress(done, total, tplName);
-            let next = 1;
-            await Promise.all(Array.from({ length: Math.min(CONC, total - 1) }, async () => {
-                while (next < total) {
-                    const cur = next++;
-                    await genOne(cur);
-                    done++;
-                    siRenderProgress(done, total, tplName);
-                }
-            }));
-        } else {
+        {
             let next = 0;
             await Promise.all(Array.from({ length: Math.min(CONC, total) }, async () => {
                 while (next < total) {
