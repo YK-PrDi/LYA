@@ -29,3 +29,8 @@ tools/sku_input_diag.json
 sku参考.jpg
 
 tools/vc_redist.x64.exe
+
+# 拼多多登录态浏览器配置（含敏感 cookie，禁止入库）
+tools/pdd_browser_profile/
+# Claude 工作树
+.claude/worktrees/

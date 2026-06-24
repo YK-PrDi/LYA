@@ -148,13 +148,13 @@ public class ShowerCompositor {
         Color banner = darken(bgBase, 0.6);
 
         if (drawCard) {
-            // 横向展示卡（宽 > 高，4:3）；位置按 region 决定
+            // 横向展示卡（宽 > 高，4:3）；固定尺寸，位置按 region 决定
             int cardW = (int)(W * 0.32);
             int cardH = (int)(cardW * 3.0 / 4.0);
             int cx, cy;
-            // 底部通栏占底部约 12%，卡底锚定在通栏上方留 2% 间隙
+            // 底部通栏占底部约 14%，卡底不超过此线
             int cardBottom = (int)(H * 0.86);
-            // 顶部安全线：左上文字带约占顶部 33%，卡顶不得越过此线（1024 下约 y=340）
+            // 顶部安全线：左上文字带约占顶部 34%，卡顶不低于此线
             int topSafe = (int)(H * 0.34);
             if ("left-bottom".equals(region)) {
                 cx = (int)(W * 0.05); cy = cardBottom - cardH;
@@ -162,15 +162,12 @@ public class ShowerCompositor {
                 cx = (int)(W * 0.05); cy = cardBottom - cardH;
             } else if ("center".equals(region)) {
                 cx = (W - cardW) / 2; cy = (H - cardH) / 2;
-            } else { // right-center：右侧中部偏上（避开右下人像、落在顶部文字下方）
-                cx = (int)(W * 0.56); cy = (int)(H * 0.30);
+            } else { // right-center：右侧中部偏上、尽量贴右边（避开右下人像、落在顶部文字下方）
+                cx = (int)(W * 0.64); cy = (int)(H * 0.30);
             }
-            // 卡顶越过安全线则压缩卡高、保持卡底不动，确保不挡上方文字
-            if (cy < topSafe) {
-                cy = topSafe;
-                cardH = cardBottom - topSafe;
-                cardW = (int)(cardH * 4.0 / 3.0);
-            }
+            // 仅夹紧位置（不改变卡尺寸）：卡顶不越安全线、卡底不压底部通栏
+            if (cy < topSafe) cy = topSafe;
+            if (cy + cardH > cardBottom) cy = Math.max(topSafe, cardBottom - cardH);
             java.util.List<String> txts = new java.util.ArrayList<>();
             for (int i = 0; i < items.size(); i++) txts.add(accDisplay(items.get(i), labels.get(i), 0));
             if (hasFilter) txts.add(filterDisplay(filterCount));

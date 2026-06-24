@@ -872,6 +872,28 @@ async function lyAutoRun() {
                 }))
             }));
         }
+        // 兜底：AI 可能把「全配/全套/套装」型号的 components 漏填（只剩滤芯）。
+        // 凡型号名含全配类词，就用 accSkus（该主件全部可用配件类型）补全缺失的配件，并把名字改写成具体配件。
+        const allAccTypes = [...new Set((accSkus || []).map(a => a.type || a.keyword).filter(Boolean))];
+        ladders = (ladders || []).map(ld => {
+            const nm = ld.name || '';
+            if (!/全配|全套|套装/.test(nm)) return ld;
+            const have = new Set((ld.components || []).map(c => c.match));
+            const comps = (ld.components || []).slice();
+            allAccTypes.forEach(t => {
+                if (!have.has(t)) {
+                    const a = accByKw[t];
+                    comps.push({ match: t, qty: a?.defaultQty || (t === '滤芯' ? 5 : 1) });
+                }
+            });
+            // 名字改写成「喷头+各配件」具体描述（软管/底座/滤芯按类型名拼）
+            const nameParts = comps.map(c => {
+                const a = accByKw[c.match];
+                const base = a?.name || c.match;
+                return c.qty > 1 ? `${base}*${c.qty}` : base;
+            });
+            return { name: ('喷头+' + nameParts.join('+')) || nm, components: comps };
+        });
         // 成本/重量查表（来自 ERP 单品行）
         const costMap = {};
         (window._erpAllSkuRowsFull || []).forEach(r => {

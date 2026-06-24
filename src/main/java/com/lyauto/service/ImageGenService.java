@@ -323,16 +323,20 @@ public class ImageGenService {
         // ── openai + 花洒 sticker 贴图模式：AI 生右侧主件+背景，左侧由 Java 合成贴图。
         //    （ai 模板不走这里，落到下方统一路径，享受基准图复用/img2img/配件卡/通栏等完整逻辑）──
         if (openai && isShower && stickerMode) {
-            String bgStyle = "clean light gray studio backdrop, soft diffused lighting";
+            // 背景：优先用同批共享的主图背景描述；并把营销主图作为参考图喂给模型（否则背景无从参考）
+            String bgStyle = (bgStyleOverride != null && !bgStyleOverride.isBlank())
+                ? bgStyleOverride
+                : "严格复刻所给营销主图的背景：颜色、光影层次、装饰元素与氛围一致，背景丰富有层次，不要简化成单调纯色块";
             String showerTemplate = PromptLoader.load("prompt/image-shower-main.txt");
             prompt = showerTemplate
                 .replace("{{bgStyle}}",   bgStyle)
                 .replace("{{colorName}}", colorOnly);
 
-            // 参考图：本色花洒白底图 + 袋子（配件/水质不传给 AI，左侧由合成贴图）
+            // 参考图：本色花洒白底图 + 袋子 + 营销主图(背景参考)（配件/水质不传给 AI，左侧由合成贴图）
             List<File> showerRefs = new java.util.ArrayList<>();
             if (hasWhiteBg) showerRefs.add(whiteBgRef);
             if (hasBag) showerRefs.add(bag);
+            if (hasRef) showerRefs.add(ref);
 
             // 一次生成
             Exception lastShower = null;
