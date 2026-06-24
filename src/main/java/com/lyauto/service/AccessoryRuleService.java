@@ -127,6 +127,8 @@ public class AccessoryRuleService {
                     if (erpSkus != null) {
                         for (Map<String, Object> s : erpSkus) {
                             String nm = String.valueOf(s.getOrDefault("name", s.getOrDefault("productName", "")));
+                            // 防御：配件绝不能命中整支花洒/整机（名称含 手喷/单花洒/整机），否则会被当配件拼进组合、价格离谱
+                            if (nm.contains("手喷") || nm.contains("单花洒") || nm.contains("整机")) continue;
                             if (nm.contains(kw)) { hit = s; break; }
                         }
                     }

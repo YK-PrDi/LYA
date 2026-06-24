@@ -348,10 +348,9 @@ async function main() {
         // 关闭可能出现的弹窗
         await closePddPopups();
 
-        // ── STEP 1.5：拼多多改版后，发布新商品会先出现「以图发品 / 搜索发品」选择，需先点「搜索发品」进类目搜索 ──
+        // ── STEP 1.5：拼多多改版后，发布新商品可能先出现「以图发品 / 搜索发品」选择（也可能没有，容错处理）──
         try {
             const entryClicked = await page.evaluate(() => {
-                // 精确点「搜索发品」的 tab 标签（class=search-tab-label），不要点到顶部全局搜索框
                 const labels = [...document.querySelectorAll('.search-tab-label, [class*="search-tab-label"], [class*="tab-label"]')];
                 for (const el of labels) {
                     if ((el.textContent || '').replace(/\s+/g, '') === '搜索发品') {
@@ -361,7 +360,6 @@ async function main() {
                         return true;
                     }
                 }
-                // 兜底：全局找文字恰为「搜索发品」的可点击元素（排除 input）
                 for (const el of document.querySelectorAll('div,span,button,a')) {
                     if (el.tagName !== 'INPUT' && (el.textContent || '').replace(/\s+/g, '') === '搜索发品') {
                         el.click(); return true;
@@ -370,66 +368,93 @@ async function main() {
                 return false;
             });
             if (entryClicked) { log('STEP1.5: 已点击「搜索发品」'); await page.waitForTimeout(2000); }
-            else log('STEP1.5: 未出现「搜索发品」选择（可能已直接在类目页或旧版页面）');
+            else log('STEP1.5: 未出现「搜索发品」选择（新版直接进表单，跳过）');
         } catch (e) { log('STEP1.5: 处理发品方式选择跳过: ' + e.message.split('\n')[0]); }
 
         await closePddPopups();
+        // 等待 header 遮罩消失，避免误点
+        await page.waitForFunction(
+            () => { const m = document.getElementById('mms-header__mask'); return !m || m.offsetParent === null || getComputedStyle(m).display === 'none'; },
+            { timeout: 10000 }
+        ).catch(() => page.evaluate(() => { const m = document.getElementById('mms-header__mask'); if (m) m.style.display = 'none'; }));
+        await page.waitForTimeout(500);
         if (dryRun) { await page.screenshot({ path: 'step1_add_page.png' }); log('截图已保存: step1_add_page.png'); }
 
-        // ── STEP 2：选择商品类目 ────────────────────────────────────────
-        progress(15, '选择商品类目');
+        // ── STEP 2：上传主图（新版流程：先传主图）────────────────────────
+        progress(15, '上传主图');
+        if (config.mainImgDir) {
+            const count = await uploadImagesToArea(page, 0, config.mainImgDir);
+            log(`主图上传完成，共 ${count} 张`);
+            await closePddPopups();
+        }
+        progress(25, '主图上传完成');
+        if (dryRun) { await page.screenshot({ path: 'step2_main_imgs.png' }); log('截图已保存: step2_main_imgs.png'); }
 
-        // 等待 header 遮罩消失（最多 10 秒），再操作品类
-        await page.waitForFunction(
-            () => {
-                const mask = document.getElementById('mms-header__mask');
-                return !mask || mask.offsetParent === null || getComputedStyle(mask).display === 'none';
-            },
-            { timeout: 10000 }
-        ).catch(() => {
-            // 超时后强制隐藏遮罩
-            return page.evaluate(() => {
-                const mask = document.getElementById('mms-header__mask');
-                if (mask) mask.style.display = 'none';
-            });
-        });
-        await page.waitForTimeout(500);
+        // ── STEP 3：填写商品标题 ────────────────────────────────────────
+        progress(30, '填写商品标题');
+        if (config.title) {
+            const titleInput = await page.$('input[placeholder*="商品标题"], textarea[placeholder*="商品标题"]');
+            if (titleInput) {
+                await titleInput.click();
+                await titleInput.fill('');
+                await titleInput.type(config.title, { delay: 30 });
+                await page.waitForTimeout(500);
+                log('标题已填写');
+            } else {
+                log('⚠ 未找到商品标题输入框');
+            }
+        }
 
+        // ── STEP 4：选择商品分类（新版：商品分类区点「选择分类」→ 弹框搜索输入 → 点选末级 → 确认）──
+        progress(38, '选择商品分类');
         const category = config.category || '';
         if (category) {
-            // 品类页的分类搜索框（拼多多新版 placeholder「请输入类目关键词」）。
-            // 必须排除顶部全局搜索框（class 含 mms-header / placeholder 含「搜索功能」）。
-            let searchInput = await page.$('input[placeholder*="类目关键词"], input[placeholder*="搜索分类"]');
-            if (!searchInput) {
-                searchInput = await page.evaluateHandle(() => {
+            const keyword = category.split('>').pop().trim();
+            // 1) 点开「选择分类」按钮
+            let opened = false;
+            try {
+                const selBtn = page.locator('button:has-text("选择分类"), [class*="select"]:has-text("选择分类"), a:has-text("选择分类"), span:has-text("选择分类")').first();
+                await selBtn.click({ force: true, timeout: 5000 });
+                opened = true;
+                log('STEP4: 已点击「选择分类」');
+            } catch (_) {
+                log('STEP4: 未找到「选择分类」按钮，尝试直接在分类搜索框输入');
+            }
+            await page.waitForTimeout(1200);
+            await closePddPopups();
+
+            // 2) 在弹框/分类区找搜索输入框（排除顶部全局搜索框）
+            let catInput = await page.$('input[placeholder*="类目关键词"], input[placeholder*="搜索分类"], input[placeholder*="请输入类目"], input[placeholder*="搜索类目"]');
+            if (!catInput) {
+                catInput = await page.evaluateHandle(() => {
                     const isGlobal = el => /mms-header/.test(el.className || '') || /搜索功能|订单|课程/.test(el.placeholder || '');
-                    const ins = [...document.querySelectorAll('input[type="text"], input:not([type])')]
+                    // 优先在弹框(dialog/modal)内找
+                    const scope = document.querySelector('[role="dialog"], [class*="modal"], [class*="Modal"], [class*="dialog"]') || document;
+                    const ins = [...scope.querySelectorAll('input[type="text"], input:not([type])')]
                         .filter(el => el.offsetParent !== null && !isGlobal(el));
                     const hit = ins.find(el => /类目|分类|关键词/.test(el.placeholder || '')) || ins[0];
                     return hit || null;
                 }).then(h => h.asElement());
             }
-            if (searchInput) {
-                const keyword = category.split('>').pop().trim();
-                await searchInput.click({ force: true });
+            if (catInput) {
+                await catInput.click({ force: true });
                 await page.waitForTimeout(300);
-                await searchInput.type(keyword, { delay: 80 });
+                await catInput.type(keyword, { delay: 80 });
                 await page.waitForTimeout(2500);
 
-                // 用 locator 按文字精确匹配叶子分类（has-text 匹配包含文字的最小元素）
-                // 优先找精确匹配，次选含关键词的第一个可点击结果
+                // 3) 在弹框结果里点选末级类目（按文字精确匹配）
                 let clicked = false;
                 try {
-                    const exact = page.locator(`[class*="SPP_searchItem"], [class*="searchItem"], [class*="search-item"]`).filter({ hasText: keyword }).first();
+                    const exact = page.locator('[class*="searchItem"], [class*="search-item"], [class*="SPP_searchItem"], [role="dialog"] li, [class*="modal"] li')
+                        .filter({ hasText: keyword }).first();
                     await exact.click({ force: true, timeout: 3000 });
                     clicked = true;
-                    log('品类点击成功: ' + keyword);
+                    log('STEP4: 分类点击成功: ' + keyword);
                 } catch (_) {}
-
                 if (!clicked) {
-                    // fallback：找所有包含 keyword 文字的叶子节点，点第一个
                     const elHandle = await page.evaluateHandle((kw) => {
-                        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                        const scope = document.querySelector('[role="dialog"], [class*="modal"], [class*="Modal"], [class*="dialog"]') || document.body;
+                        const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
                         let node;
                         while ((node = walker.nextNode())) {
                             if (node.nodeValue.trim() === kw) {
@@ -441,59 +466,52 @@ async function main() {
                         return null;
                     }, keyword);
                     const el = elHandle.asElement();
-                    if (el) {
-                        await el.click({ force: true });
-                        log('品类 fallback 点击: ' + keyword);
-                    } else {
-                        log('未找到品类: ' + keyword);
-                    }
+                    if (el) { await el.click({ force: true }); clicked = true; log('STEP4: 分类 fallback 点击: ' + keyword); }
+                    else log('⚠ STEP4: 弹框内未匹配到分类「' + keyword + '」，请确认末级品类名与拼多多一致');
                 }
-                await page.waitForTimeout(1500);
-                if (!clicked) {
-                    // 兜底也没点中：检查搜索结果区是否真有可选项，没有就明确报错（避免点"下一步"触发拼多多"请先选择分类"）
-                    log('⚠ 类目关键词「' + keyword + '」未匹配到可点击的叶子分类。请确认软件里选的末级品类名与拼多多类目搜索结果一致。');
-                }
+                await page.waitForTimeout(1000);
+
+                // 4) 点弹框「确认/确定」
+                try {
+                    const okBtn = page.locator('[role="dialog"] button:has-text("确认"), [role="dialog"] button:has-text("确定"), [class*="modal"] button:has-text("确认"), [class*="modal"] button:has-text("确定"), button:has-text("确认")').first();
+                    await okBtn.click({ force: true, timeout: 3000 });
+                    log('STEP4: 分类弹框已确认');
+                    await page.waitForTimeout(1500);
+                } catch (_) { log('STEP4: 未找到分类弹框确认按钮（可能点选后自动关闭）'); }
             } else {
-                log('⚠ 未找到拼多多类目搜索框，页面可能改版');
+                log('⚠ STEP4: 未找到分类搜索输入框，页面可能再次改版');
             }
-            // 点击确认/下一步按钮
-            const confirmBtn = await page.$('button:has-text("确认发布"), button:has-text("确认"), button:has-text("下一步")');
-            if (confirmBtn) {
-                await confirmBtn.click({ force: true });
-                await page.waitForTimeout(2000);
-                // 点完后若拼多多弹「请先选择分类」，说明类目没真正选中——明确报错中断，不要继续走下去
-                const needCat = await page.evaluate(() => document.body.innerText.includes('请先选择分类') || document.body.innerText.includes('请选择分类'));
-                if (needCat) {
-                    throw new Error('类目未选中：拼多多提示「请先选择分类」。请检查软件里所选末级品类名是否与拼多多类目库一致（当前关键词：' + (category.split('>').pop().trim()) + '）');
-                }
+            // 校验：若页面提示「请先选择分类」则中断
+            const needCat = await page.evaluate(() => document.body.innerText.includes('请先选择分类') || document.body.innerText.includes('请选择分类'));
+            if (needCat) {
+                throw new Error('分类未选中：拼多多提示「请先选择分类」。请检查软件里所选末级品类名是否与拼多多类目库一致（当前关键词：' + keyword + '）');
             }
         }
-        progress(20, '类目选择完成');
+        progress(40, '分类选择完成');
+        if (dryRun) { await page.screenshot({ path: 'step4_category.png' }); log('截图已保存: step4_category.png'); }
 
-        if (dryRun) { await page.screenshot({ path: 'step2_category.png' }); log('截图已保存: step2_category.png'); }
-
-        // ── STEP 3：上传主图 ────────────────────────────────────────────
-        progress(25, '上传主图');
-        if (config.mainImgDir) {
-            const count = await uploadImagesToArea(page, 0, config.mainImgDir);
-            log(`主图上传完成，共 ${count} 张`);
+        // ── STEP 4.5：点「下一步，完善商品信息」进入第二段表单（新版两段式发布）──
+        progress(42, '进入完善商品信息');
+        try {
+            // 按钮文字可能是「下一步，完善商品信息」/「下一步」/「完善商品信息」
+            let nextClicked = false;
+            const nextBtn = page.locator('button:has-text("完善商品信息"), button:has-text("下一步"), [class*="btn"]:has-text("下一步")').first();
+            try { await nextBtn.click({ force: true, timeout: 5000 }); nextClicked = true; }
+            catch (_) {
+                // 兜底：全局找文字含「下一步/完善商品信息」的可点击元素
+                nextClicked = await page.evaluate(() => {
+                    for (const el of document.querySelectorAll('button,a,[role="button"],div,span')) {
+                        const t = (el.textContent || '').replace(/\s+/g, '');
+                        if ((t.includes('完善商品信息') || t === '下一步') && el.offsetParent !== null) { el.click(); return true; }
+                    }
+                    return false;
+                });
+            }
+            if (nextClicked) { log('STEP4.5: 已点「下一步，完善商品信息」'); await page.waitForTimeout(2500); }
+            else log('⚠ STEP4.5: 未找到「下一步/完善商品信息」按钮（可能是单段式表单，继续）');
             await closePddPopups();
-        }
-        progress(35, '主图上传完成');
-
-        if (dryRun) { await page.screenshot({ path: 'step3_main_imgs.png' }); log('截图已保存: step3_main_imgs.png'); }
-
-        // ── STEP 4：填写商品标题 ────────────────────────────────────────
-        progress(40, '填写商品标题');
-        if (config.title) {
-            const titleInput = await page.$('input[placeholder*="商品标题"], textarea[placeholder*="商品标题"]');
-            if (titleInput) {
-                await titleInput.click();
-                await titleInput.fill('');
-                await titleInput.type(config.title, { delay: 30 });
-                await page.waitForTimeout(500);
-            }
-        }
+        } catch (e) { log('STEP4.5: 进入完善商品信息跳过: ' + e.message.split('\n')[0]); }
+        if (dryRun) { await page.screenshot({ path: 'step4_5_next.png' }); log('截图已保存: step4_5_next.png'); }
 
         // ── STEP 5：填写商品属性 ────────────────────────────────────────
         progress(45, '填写商品属性');
@@ -1356,12 +1374,11 @@ async function main() {
         await page.screenshot({ path: 'submit_result.png' }).catch(() => {});
         log('提交结果截图已保存: submit_result.png');
 
-        // 严格判成功：URL 真正跳离编辑页（到 success/列表页），或出现明确的成功弹窗标题。
-        // 不再用宽松的 div:has-text("成功")（会误命中页面里任意含「成功」的文字 → 误报）。
-        const leftEditPage = !/goods_add|goods\/edit/.test(submitResultUrl) &&
-            (submitResultUrl.includes('success') || submitResultUrl.includes('goods_list') || submitResultUrl.includes('goods/list'));
+        // 判成功：URL 跳到成功页（goods_add/success?goods_id=... 即成功）或商品列表页，或出现成功弹窗。
+        // 注意：成功页 URL 形如 .../goods_add/success，含 success 即成功——不能因它也含 goods_add 就否定。
+        const okUrl = /\/success(\?|$|\/)/.test(submitResultUrl) || submitResultUrl.includes('goods_list') || submitResultUrl.includes('goods/list');
         const successModal = await page.$('.success-modal, [class*="successModal"], [class*="result-success"], [class*="publishSuccess"]').catch(() => null);
-        const isSuccess = leftEditPage || !!successModal;
+        const isSuccess = okUrl || !!successModal;
 
         if (isSuccess) {
             progress(100, '商品发布成功');

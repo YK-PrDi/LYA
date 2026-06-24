@@ -3,6 +3,8 @@ package com.lyauto.controller;
 import com.lyauto.config.AppProperties;
 import com.lyauto.service.KuaimaiService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 @RequestMapping("/api/erp")
 public class KuaimaiController {
 
+    private static final Logger log = LoggerFactory.getLogger(KuaimaiController.class);
     private final KuaimaiService kuaimaiService;
     private final AppProperties appProperties;
 
@@ -214,13 +217,23 @@ public class KuaimaiController {
 
                 double materialCost = 0, totalWeight = 0;
                 List<Map<String, Object>> breakdown = new ArrayList<>();
+                int compIdx = 0;
                 for (Map<String, Object> comp : components) {
                     String code = String.valueOf(comp.get("itemCode"));
                     int qty = Math.max(1, toInt(comp.getOrDefault("qty", 1)));
                     double unit = toDouble(comp.get("cost"));     // 材料价（核对后）
                     double w    = toDouble(comp.get("weight"));
-                    materialCost += unit * qty;
-                    totalWeight  += w * qty;
+                    // 成本异常保护：除首个主件外，配件若本身是「整支花洒/整机」（编码或名称含 单手喷/单花洒/整机）
+                    // 说明被误当配件拼进了组合（如全配里多出一支花洒），记日志并不计入成本，避免拼单价离谱。
+                    String cn = code + " " + String.valueOf(comp.getOrDefault("name", ""));
+                    boolean isWholeShower = compIdx > 0 && (cn.contains("单手喷") || cn.contains("单花洒") || cn.contains("整机"));
+                    if (isWholeShower) {
+                        log.warn("组合成本保护：SKU「{}」的组件 {} 疑似整支花洒被误当配件，已不计入成本", name, code);
+                    } else {
+                        materialCost += unit * qty;
+                        totalWeight  += w * qty;
+                    }
+                    compIdx++;
 
                     Map<String, Object> b = new LinkedHashMap<>();
                     b.put("itemCode", code);

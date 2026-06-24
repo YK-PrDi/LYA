@@ -311,6 +311,7 @@ function lstSkuEdit(idx, field, val) {
 
 // ── SKU 生图面板 ──
 let siGenImages = [];   // [{name, path, error}]
+let siAbort = null;     // 当前生成批次的 AbortController（关闭弹窗时中止在途请求）
 
 async function openSkuImgModal() {
     if (!lstSkuItems.length) { alert('请先确认 SKU 布局'); return; }
@@ -346,7 +347,11 @@ async function openSkuImgModal() {
     }
 }
 
-function closeSkuImgModal() { document.getElementById('skuImgModal')?.classList.remove('show'); }
+function closeSkuImgModal() {
+    // 取消/关闭时中止在途生成请求，释放浏览器连接池（否则残留请求拖慢下次主图加载）
+    if (siAbort) { try { siAbort.abort(); } catch (_) {} siAbort = null; }
+    document.getElementById('skuImgModal')?.classList.remove('show');
+}
 
 // ── 设置（人工/全自动、方案数）存 localStorage ──
 function lyGetSettings() {
@@ -545,6 +550,8 @@ async function siGenerate() {
     const productType = (lstCatPath[lstCatPath.length - 1] || '');
     btn.disabled = true;
     const box = document.getElementById('siContent');
+    // 本批生成的中止控制器：关闭弹窗/取消时 abort，释放浏览器连接池（否则残留的生图请求会占满连接、拖慢下次主图加载）
+    siAbort = new AbortController();
     try {
         // 共享参考图只取一次（袋子/配件/水质对比）
         const bagImagePath = await siFindBagImage(productType);
@@ -584,7 +591,8 @@ async function siGenerate() {
             for (let attempt = 1; attempt <= RETRY; attempt++) {
                 try {
                     const resp = await fetch('/api/listing/gen-sku-images', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reqBody
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reqBody,
+                        signal: siAbort ? siAbort.signal : undefined
                     });
                     const data = await resp.json();
                     const one = (data.images || [])[0];
@@ -596,6 +604,7 @@ async function siGenerate() {
                     }
                     lastErr = (one && one.error) || data.error || '生成失败';
                 } catch (e) {
+                    if (e.name === 'AbortError' || (siAbort && siAbort.signal.aborted)) return;  // 已取消：静默退出，不重试
                     lastErr = e.message;
                 }
                 if (attempt < RETRY) {
