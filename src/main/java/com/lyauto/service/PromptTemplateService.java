@@ -110,11 +110,15 @@ public class PromptTemplateService {
             File f = new File((String) bi);
             if (f.isFile()) return f;
         }
-        String name = String.valueOf(tpl.get("name"));
-        // 先按「有配件/无配件」变体匹配，没有再退回无后缀的单图
-        File builtin = builtinBaseByName(name + (hasAcc ? "-有配件" : "-无配件"));
-        if (builtin == null) builtin = builtinBaseByName(name);
-        if (builtin != null) return builtin;
+        // 模板可设 noBuiltinBase=true 跳过内置图：当批 AI 用加强提示词重生首张作基准，再缓存复用。
+        boolean skipBuiltin = Boolean.TRUE.equals(tpl.get("noBuiltinBase"));
+        if (!skipBuiltin) {
+            String name = String.valueOf(tpl.get("name"));
+            // 先按「有配件/无配件」变体匹配，没有再退回无后缀的单图
+            File builtin = builtinBaseByName(name + (hasAcc ? "-有配件" : "-无配件"));
+            if (builtin == null) builtin = builtinBaseByName(name);
+            if (builtin != null) return builtin;
+        }
         File cache = baseCacheFile(String.valueOf(tpl.get("id")));
         return cache.isFile() ? cache : null;
     }

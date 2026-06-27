@@ -623,7 +623,7 @@ async function siGenerate() {
 
         // 所有 ai 模板均已内置基准图（assets/base/ 有/无配件两版），无需再「串行先生成首张作基准」，
         // 直接全批并发图生图，省掉首张 4~5 分钟前置。
-        const CONC = 6;
+        const CONC = 8;
         let done = 0;
         {
             let next = 0;
@@ -746,10 +746,12 @@ function siCellHtml(im) {
     const idx = im.idx;
     const dispName = lstSkuItems[idx] ? (lstSkuItems[idx].skuDisplayName || lstSkuItems[idx].name || '') : (im.name || '');
     const ok = im.path && !im.error;
+    // 重新生成的图文件被覆盖，需加 cache-buster 强制刷新；首次批量生成的路径唯一，不加（加了会绕过缓存、导致白屏延迟）
+    const src = ok ? `/api/image?path=${encodeURIComponent(im.path)}${im.bust ? '&t=' + im.bust : ''}` : '';
     const inner = im.loading
         ? `<div style="width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--surface-alt);border-radius:6px;color:var(--text-dim);font-size:0.7rem;">⏳ 生成中…</div>`
         : ok
-            ? `<img src="/api/image?path=${encodeURIComponent(im.path)}&t=${Date.now()}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border);">`
+            ? `<img src="${src}" loading="lazy" decoding="async" onload="this.style.opacity=1" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:var(--surface-alt);opacity:0;transition:opacity .25s;">`
             : `<div style="width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--surface-alt);border-radius:6px;color:#dc2626;font-size:0.7rem;text-align:center;padding:6px;">${ecEscAttr(im.error||'失败')}</div>`;
     return `<div id="siCell_${idx}" style="display:flex;flex-direction:column;gap:4px;">
         ${inner}
@@ -790,7 +792,7 @@ async function siRegenOne(idx) {
         const data = await resp.json();
         const one = (data.images || [])[0];
         const pos = siGenImages.findIndex(im => im.idx === idx);
-        if (one) { if (pos >= 0) siGenImages[pos] = one; else siGenImages.push(one); }
+        if (one) { one.bust = Date.now(); if (pos >= 0) siGenImages[pos] = one; else siGenImages.push(one); }  // 重生文件被覆盖，加 cache-buster 强制刷新
         else if (target) { target.loading = false; target.error = data.error || '失败'; }
     } catch (e) {
         if (target) { target.loading = false; target.error = e.message; }
@@ -886,11 +888,18 @@ async function lyAutoRun() {
                     comps.push({ match: t, qty: a?.defaultQty || (t === '滤芯' ? 5 : 1) });
                 }
             });
-            // 名字改写成「喷头+各配件」具体描述（软管/底座/滤芯按类型名拼）
+            // 名字改写成「喷头+各配件」：用配件类型规范名（底座→银底座、软管→n米软管、滤芯→滤芯*N），
+            // 不要用 ERP 单品全名（那会拼出 "GF-100银色花洒+银色027滤芯筒" 这种乱名）。
             const nameParts = comps.map(c => {
                 const a = accByKw[c.match];
-                const base = a?.name || c.match;
-                return c.qty > 1 ? `${base}*${c.qty}` : base;
+                const fname = (a && a.name) ? a.name : '';
+                if (c.match === '滤芯') return `滤芯*${c.qty || 5}`;
+                if (c.match === '软管') {
+                    const m = fname.includes('2米') ? '2米' : (fname.includes('1.5') ? '1.5米' : '');
+                    return `${m}软管`;
+                }
+                if (c.match === '底座') return '银底座';
+                return c.match;  // 其它类型用关键字本身，绝不用整机全名
             });
             return { name: ('喷头+' + nameParts.join('+')) || nm, components: comps };
         });
@@ -906,7 +915,7 @@ async function lyAutoRun() {
             ladders.forEach(ld => {
                 const parts = (ld.components || []).map(c => {
                     const a = accByKw[c.match]; if (!a) return null;
-                    return { code: a.itemCode, qty: c.qty || a.defaultQty || 1, kw: c.match };
+                    return { code: cleanAccCode(a.itemCode, c.match), qty: c.qty || a.defaultQty || 1, kw: c.match };
                 }).filter(Boolean);
                 const codeStr = [main.itemCode].concat(parts.map(p => p.qty > 1 ? `${p.code}*${p.qty}` : p.code)).join('+');
                 items.push({
@@ -1189,6 +1198,18 @@ function spAccKw(code) {
     if (nm.includes('滤芯')) return '滤芯';
     if (nm.includes('底座') || nm.includes('支架') || nm.includes('挂座')) return '底座';
     return '';
+}
+
+// 清洗配件编码：有的配件 ERP outerId 本身是组合套装串（如 "GF-001-纯白+1.5米银软管+银底座+001滤芯*10"），
+// 直接拼进规格编码会乱。按关键字(kw)抽取该串里对应的那一段作为干净配件码；不是组合串则原样返回。
+function cleanAccCode(rawCode, kw) {
+    const code = String(rawCode || '').trim();
+    if (!code.includes('+')) return code;          // 单码，直接用
+    const segs = code.split('+').map(s => s.trim()).filter(Boolean);
+    // 关键字 → 在分段里找含该字样的段（去掉 *N 数量后缀）
+    const kwHit = segs.find(s => kw && s.includes(kw));
+    const pick = (kwHit || segs[segs.length - 1]).replace(/\*\d+$/, '');
+    return pick;
 }
 
 // 滤芯识别：名称含"滤芯"才允许调数量

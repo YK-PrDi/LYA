@@ -128,17 +128,23 @@ public class AiImageClient {
      */
     public String analyzeBackgroundStyleOnce(String refImagePath) {
         try {
-            AppProperties.GptImage cfg = appProperties.getGptImage();
-            if (!"gemini".equalsIgnoreCase(cfg.getProvider())) return "";
-            List<String> keys = cfg.keyList();
-            if (keys.isEmpty()) return "";
             File ref = new File(refImagePath);
             if (!ref.isFile()) return "";
-            String bg = analyzeBackgroundStyle(buildHttp(), cfg.getBaseUrl(), keys.get(0), ref);
+            AppProperties.GptImage cfg = appProperties.getGptImage();
+            // gemini：用原生视觉分析；其它(openai/gpt-image-2)：背景分析改走文本模型(qwen-vl 看图)
+            if ("gemini".equalsIgnoreCase(cfg.getProvider())) {
+                List<String> keys = cfg.keyList();
+                if (keys.isEmpty()) return "";
+                String bg = analyzeBackgroundStyle(buildHttp(), cfg.getBaseUrl(), keys.get(0), ref);
+                return bg == null ? "" : bg.trim();
+            }
+            // A 方案：qwen-vl 看图出背景描述（与生图 provider 解耦，整批只调一次）
+            String prompt = PromptLoader.load("prompt/image-analyze-bg-style.txt");
+            String bg = geminiText(prompt, List.of(refImagePath));
             return bg == null ? "" : bg.trim();
         } catch (Exception e) {
             log.warn("批量背景分析失败: {}", e.getMessage());
-            return "";
+            return "";   // 失败→空串，由 B 方案兜底（editInstruction 固定「以主图为背景」话术）
         }
     }
 

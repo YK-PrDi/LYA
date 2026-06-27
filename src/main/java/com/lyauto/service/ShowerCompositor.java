@@ -74,18 +74,28 @@ public class ShowerCompositor {
             drawAccCard(g, cardX, cardY, cardW, cardH, showImgs, String.join(" / ", txts), 0, banner);
         }
 
-        // 底部全宽深色通栏：写款式名（如「一键止水花洒+1.5米软管」）
-        String bottomTxt = compDesc == null ? "" : compDesc.trim();
-        if (!bottomTxt.isBlank()) {
+        // 底部全宽深色通栏：固定卖点文案 + 固定字号（不自适应缩放，保证每张图字体大小完全一致）
+        String bottomTxt = "多档涡轮增压柔肤花洒";
+        {
             int bh = (int)(H * 0.10);
             int by = H - bh;
             g.setColor(darken(bgBase, 0.45));
             g.fillRect(0, by, W, bh);
-            drawFitText(g, bottomTxt, (int)(W * 0.04), by, (int)(W * 0.92), bh, 52, Color.WHITE);
+            drawCenteredText(g, bottomTxt, 0, by, W, bh, 46, Color.WHITE);
         }
 
         g.dispose();
         return writeJpg(base, batch, seq, skuName);
+    }
+
+    /** 固定字号居中绘制（不缩放）：保证同类图文字大小一致。 */
+    private void drawCenteredText(Graphics2D g, String text, int x, int y, int w, int h, int fs, Color color) {
+        g.setFont(new Font("Microsoft YaHei", Font.BOLD, fs));
+        java.awt.FontMetrics fm = g.getFontMetrics();
+        int tx = x + (w - fm.stringWidth(text)) / 2;
+        int ty = y + (h - fm.getHeight()) / 2 + fm.getAscent();
+        g.setColor(color);
+        g.drawString(text, tx, ty);
     }
 
     /** 颜色按因子加深（f<1 变暗）。 */
@@ -159,7 +169,8 @@ public class ShowerCompositor {
             if ("left-bottom".equals(region)) {
                 cx = (int)(W * 0.05); cy = cardBottom - cardH;
             } else if ("left-mid-bottom".equals(region)) {
-                cx = (int)(W * 0.05); cy = cardBottom - cardH;
+                // 出水模式：配件卡在画面中下部偏右、底部横幅上方（往右挪、可压住主花洒，但不与左侧出水模式卡贴边）
+                cx = (int)(W * 0.42); cy = cardBottom - cardH;
             } else if ("center".equals(region)) {
                 cx = (W - cardW) / 2; cy = (H - cardH) / 2;
             } else { // right-center：右侧中部偏上、尽量贴右边（避开右下人像、落在顶部文字下方）

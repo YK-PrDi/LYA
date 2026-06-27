@@ -2,6 +2,8 @@ package com.lyauto.controller;
 
 import com.lyauto.model.ListingConfig;
 import com.lyauto.service.ListingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,6 +13,7 @@ import java.util.*;
 @RequestMapping("/api/listing")
 public class ListingController {
 
+    private static final Logger log = LoggerFactory.getLogger(ListingController.class);
     private final ListingService listingService;
     private final com.lyauto.service.ImageGenService imageGenService;
     private final com.lyauto.service.PromptTemplateService templateService;
@@ -155,11 +158,14 @@ public class ListingController {
             }
 
             List<Map<String, Object>> images = new java.util.ArrayList<>();
-            int seq = 1;
+            int loop = 0;
             for (Map<String, Object> s : skus) {
                 String name = String.valueOf(s.getOrDefault("name", ""));
                 String comp = String.valueOf(s.getOrDefault("compDesc", ""));
-                Object idx  = s.getOrDefault("idx", seq - 1);
+                Object idx  = s.getOrDefault("idx", loop);
+                // 图名序号用全局 idx+1（每次请求只带一个 SKU，不能用 per-request 计数器，否则全是 1_）
+                int seq;
+                try { seq = Integer.parseInt(String.valueOf(idx)) + 1; } catch (Exception ex) { seq = loop + 1; }
                 Map<String, Object> item = new java.util.LinkedHashMap<>();
                 item.put("name", name);
                 item.put("idx", idx);
@@ -168,13 +174,15 @@ public class ListingController {
                     String itemCode = String.valueOf(s.getOrDefault("itemCode", ""));
                     @SuppressWarnings("unchecked")
                     List<Map<String, Object>> accParts = (List<Map<String, Object>>) s.getOrDefault("accParts", List.of());
+                    // 诊断：打出每个 SKU 实际收到的配件清单，定位「配件框与 SKU 名对不上」是数据带错还是前端渲染错位
+                    log.info("[生图配件] seq={} idx={} name=「{}」 accParts={}", seq, idx, name, accParts);
                     String path = imageGenService.generateSkuImage(refImagePath, name, comp, productType, batch, seq, bagImagePath, whiteImgPath, accImagePaths, waterImagePath, bgStyle, itemCode, accParts, templateId);
                     item.put("path", path);
                 } catch (Exception e) {
                     item.put("error", e.getMessage());
                 }
                 images.add(item);
-                seq++;
+                loop++;
             }
             return ResponseEntity.ok(Map.of("images", images));
         } catch (Exception e) {

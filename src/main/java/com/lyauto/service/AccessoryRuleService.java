@@ -127,8 +127,13 @@ public class AccessoryRuleService {
                     if (erpSkus != null) {
                         for (Map<String, Object> s : erpSkus) {
                             String nm = String.valueOf(s.getOrDefault("name", s.getOrDefault("productName", "")));
-                            // 防御：配件绝不能命中整支花洒/整机（名称含 手喷/单花洒/整机），否则会被当配件拼进组合、价格离谱
-                            if (nm.contains("手喷") || nm.contains("单花洒") || nm.contains("整机")) continue;
+                            String cd = String.valueOf(s.getOrDefault("itemCode", s.getOrDefault("skuOuterId", "")));
+                            // 防御：配件绝不能命中整支花洒/整机/喷头主体
+                            if (nm.contains("花洒") || nm.contains("喷头") || nm.contains("手喷")
+                                || nm.contains("单花洒") || nm.contains("整机")) continue;
+                            // 排除单卖变体：名称/编码形如「<关键字>-数字」(如 银色1.5米软管-1) 是单卖款、成本不同，配件搭配不能用
+                            if (nm.matches(".*" + java.util.regex.Pattern.quote(kw) + "-\\d+.*")
+                                || cd.matches(".*" + java.util.regex.Pattern.quote(kw) + "-\\d+.*")) continue;
                             if (nm.contains(kw)) { hit = s; break; }
                         }
                     }

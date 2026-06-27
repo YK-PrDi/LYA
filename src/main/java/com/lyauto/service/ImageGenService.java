@@ -208,7 +208,11 @@ public class ImageGenService {
                 String pkw = String.valueOf(part.getOrDefault("kw", "")).trim();
                 int pqty = 1;
                 try { pqty = Math.max(1, Integer.parseInt(String.valueOf(part.getOrDefault("qty", 1)))); } catch (Exception ignore) {}
-                if (code.contains("+")) {
+                // part 已带明确 kw（软管/底座/滤芯）时，信任它、按 kw 匹配一张图，绝不拆 code——
+                // 否则像 code=「GF-001-纯白+1.5米银软管+银底座+001滤芯*10」这种套装编码会被拆成三样，
+                // 导致单软管 SKU 错误显示软管+底座+滤芯。只有 kw 为空时才回退到「按 + 拆组合码」。
+                boolean knownKw = pkw.equals("软管") || pkw.equals("底座") || pkw.equals("滤芯");
+                if (code.contains("+") && !knownKw) {
                     // 组合码：按 + 拆段，跳过首段（主件），每段解析 *N 数量 + 关键字
                     String[] segs = code.split("\\+");
                     for (int i = 1; i < segs.length; i++) {
@@ -389,6 +393,13 @@ public class ImageGenService {
                     String bg = aiClient.analyzeBackgroundStyle(http, baseUrl, keys.get(0), ref);
                     if (bg != null && !bg.isBlank()) bgStyle = bg;
                 } catch (Exception e) { log.warn("背景风格提取失败: {}", e.getMessage()); }
+            }
+            // B 兜底：useMainBg 模板若没拿到背景描述（仍是默认白底），改用「以主图为背景」话术，
+            // 避免 {{bgStyle}}=纯白影棚 的文字盖过 refs 里实际传入的主图。
+            if (aiTemplate && Boolean.TRUE.equals(tpl.get("useMainBg")) && hasRef
+                && (bgStyleOverride == null || bgStyleOverride.isBlank())
+                && "纯白或浅色简约影棚背景".equals(bgStyle)) {
+                bgStyle = "严格以所给营销主图为背景参考，完整复刻主图的背景颜色、光影与氛围，不要用纯色影棚背景";
             }
             if (aiTemplate) {
                 // 纯AI模板：基准图复用 + 图生图替换。有基准图→以它为底只换花洒/滤芯/背景；无→用 prompt 生成首张并缓存为基准。
