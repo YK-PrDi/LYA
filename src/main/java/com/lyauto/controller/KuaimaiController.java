@@ -78,21 +78,31 @@ public class KuaimaiController {
     @GetMapping("/config")
     public ResponseEntity<Map<String, Object>> getConfig() {
         AppProperties.Kuaimai km = appProperties.getKuaimai();
-        return ResponseEntity.ok(Map.of(
-            "appKey",      km.getAppKey(),
-            "accessToken", km.getAccessToken()
-        ));
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("appKey",       km.getAppKey());
+        m.put("appSecret",    km.getAppSecret());
+        m.put("accessToken",  km.getAccessToken());
+        m.put("refreshToken", km.getRefreshToken());
+        m.put("companyId",    km.getCompanyId());
+        m.put("appTitle",     km.getAppTitle());
+        return ResponseEntity.ok(m);
     }
 
     /**
-     * 更新 accessToken / refreshToken（用户粘贴新 token 时调用）。
-     * POST /api/erp/config  { "accessToken": "...", "refreshToken": "..." }
+     * 更新快麦全部配置字段（用户在界面修改后保存；token 每 30 天过期需可改）。
+     * POST /api/erp/config  { appKey, appSecret, accessToken, refreshToken, companyId, appTitle }
+     * 只更新传入的字段；更新后持久化到 kuaimai-config.json（重启后仍生效）。
      */
     @PostMapping("/config")
     public ResponseEntity<Map<String, Object>> updateConfig(@RequestBody Map<String, String> body) {
         AppProperties.Kuaimai km = appProperties.getKuaimai();
+        if (body.containsKey("appKey"))       km.setAppKey(body.get("appKey"));
+        if (body.containsKey("appSecret"))    km.setAppSecret(body.get("appSecret"));
         if (body.containsKey("accessToken"))  km.setAccessToken(body.get("accessToken"));
         if (body.containsKey("refreshToken")) km.setRefreshToken(body.get("refreshToken"));
+        if (body.containsKey("companyId"))    km.setCompanyId(body.get("companyId"));
+        if (body.containsKey("appTitle"))     km.setAppTitle(body.get("appTitle"));
+        kuaimaiService.persistAll();   // 写盘，重启后仍生效
         return ResponseEntity.ok(Map.of("ok", true));
     }
 

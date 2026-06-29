@@ -457,8 +457,13 @@
   <div class="modal-card" style="width:460px;max-width:95vw;">
     <div class="modal-header"><h3>⚙️ 快麦ERP设置</h3><button class="close-btn" onclick="closeErpConfigModal()">×</button></div>
     <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;font-size:0.8rem;">
-      <div><label style="margin-bottom:4px;">AppKey（只读）</label>
-        <span id="erpConfigAppKey" style="display:block;padding:6px 10px;background:var(--surface-alt);border-radius:5px;font-size:0.75rem;color:var(--text-dim);font-family:monospace;"></span>
+      <div><label style="margin-bottom:4px;">AppKey</label>
+        <input id="erpConfigAppKey" type="text" placeholder="快麦 AppKey"
+          style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;font-family:monospace;">
+      </div>
+      <div><label style="margin-bottom:4px;">AppSecret</label>
+        <input id="erpConfigAppSecret" type="text" placeholder="快麦 AppSecret"
+          style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;font-family:monospace;">
       </div>
       <div><label style="margin-bottom:4px;">AccessToken</label>
         <input id="erpConfigAccessToken" type="text" placeholder="粘贴新 accessToken"
@@ -467,6 +472,14 @@
       <div><label style="margin-bottom:4px;">RefreshToken（用于刷新会话）</label>
         <input id="erpConfigRefreshToken" type="text" placeholder="粘贴新 refreshToken"
           style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;font-family:monospace;">
+      </div>
+      <div><label style="margin-bottom:4px;">CompanyId（公司编号，可选）</label>
+        <input id="erpConfigCompanyId" type="text" placeholder="公司编号"
+          style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;font-family:monospace;">
+      </div>
+      <div><label style="margin-bottom:4px;">AppTitle（应用名，可选）</label>
+        <input id="erpConfigAppTitle" type="text" placeholder="应用名"
+          style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:0.75rem;box-sizing:border-box;">
       </div>
     </div>
     <div class="modal-footer">

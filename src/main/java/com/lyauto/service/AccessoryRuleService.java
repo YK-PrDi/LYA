@@ -122,7 +122,9 @@ public class AccessoryRuleService {
                     String role = String.valueOf(acc.getOrDefault("role", "accessory"));
                     int defQty = acc.get("defaultQty") instanceof Number ? ((Number) acc.get("defaultQty")).intValue() : 1;
                     if (kw.isBlank()) continue;
-                    // 在 ERP 单品池里按 name 含关键字找一个配件单品
+                    // 在 ERP 单品池里按 name 或 itemCode 含关键字找一个配件单品。
+                    // 注意：滤芯类单品 name 统一是「滤芯*N」，区分编号只在 itemCode（如 001滤芯），
+                    // 故必须同时匹配 itemCode，否则 001滤芯/052滤芯 无法区分会配错。
                     Map<String, Object> hit = null;
                     if (erpSkus != null) {
                         for (Map<String, Object> s : erpSkus) {
@@ -134,7 +136,8 @@ public class AccessoryRuleService {
                             // 排除单卖变体：名称/编码形如「<关键字>-数字」(如 银色1.5米软管-1) 是单卖款、成本不同，配件搭配不能用
                             if (nm.matches(".*" + java.util.regex.Pattern.quote(kw) + "-\\d+.*")
                                 || cd.matches(".*" + java.util.regex.Pattern.quote(kw) + "-\\d+.*")) continue;
-                            if (nm.contains(kw)) { hit = s; break; }
+                            // itemCode 精确含关键字优先（滤芯靠编码区分）；其次 name 含关键字
+                            if (cd.contains(kw) || nm.contains(kw)) { hit = s; break; }
                         }
                     }
                     if (hit != null) {

@@ -24,10 +24,10 @@ app:
     temp-output-dir: "./.temp-output"
 
   kuaimai:
-    app-key: "${KUAIMAI_APP_KEY:1919696999}"
-    app-secret: "${KUAIMAI_APP_SECRET:d739120d19e94e94a6b581128824efc5}"
-    access-token: "${KUAIMAI_ACCESS_TOKEN:5e05abcf738241b183f088ada0d541c6}"
-    refresh-token: "${KUAIMAI_REFRESH_TOKEN:16e32b299ec34916bf46c59630a8ad4c}"
+    app-key: "${KUAIMAI_APP_KEY:1702335751}"
+    app-secret: "${KUAIMAI_APP_SECRET:99b191f9f05c470591f893ecf24c3664}"
+    access-token: "${KUAIMAI_ACCESS_TOKEN:34e697530dd04dd7b548f5941a964bd6}"
+    refresh-token: "${KUAIMAI_REFRESH_TOKEN:8fb8a62836db47dcab67d391bb9f17aa}"
 
   gpt-image:
     provider: "${IMG_PROVIDER:gemini}"

@@ -64,6 +64,8 @@ public class AppProperties {
         private String appSecret = "";
         private String accessToken = "";
         private String refreshToken = "";
+        private String companyId = "";
+        private String appTitle = "";
 
         public String getAppKey() { return appKey; }
         public void setAppKey(String appKey) { this.appKey = appKey; }
@@ -73,6 +75,10 @@ public class AppProperties {
         public void setAccessToken(String accessToken) { this.accessToken = accessToken; }
         public String getRefreshToken() { return refreshToken; }
         public void setRefreshToken(String refreshToken) { this.refreshToken = refreshToken; }
+        public String getCompanyId() { return companyId; }
+        public void setCompanyId(String companyId) { this.companyId = companyId; }
+        public String getAppTitle() { return appTitle; }
+        public void setAppTitle(String appTitle) { this.appTitle = appTitle; }
     }
 
     public static class GptImage {        /** provider: gemini | openai（openai 走 gpt-image-2） */

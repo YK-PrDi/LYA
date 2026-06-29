@@ -53,23 +53,40 @@ public class KuaimaiService {
             @SuppressWarnings("unchecked")
             Map<String, String> m = objectMapper.readValue(f, Map.class);
             AppProperties.Kuaimai km = appProperties.getKuaimai();
+            if (m.containsKey("appKey")       && !m.get("appKey").isBlank())       km.setAppKey(m.get("appKey"));
+            if (m.containsKey("appSecret")    && !m.get("appSecret").isBlank())    km.setAppSecret(m.get("appSecret"));
             if (m.containsKey("accessToken"))  km.setAccessToken(m.get("accessToken"));
             if (m.containsKey("refreshToken")) km.setRefreshToken(m.get("refreshToken"));
+            if (m.containsKey("companyId"))    km.setCompanyId(m.get("companyId"));
+            if (m.containsKey("appTitle"))     km.setAppTitle(m.get("appTitle"));
         } catch (Exception e) {
             log.warn("加载快麦配置失败: {}", e.getMessage());
         }
     }
 
     private void persistTokens(String accessToken, String refreshToken) {
+        AppProperties.Kuaimai km = appProperties.getKuaimai();
+        km.setAccessToken(accessToken);
+        km.setRefreshToken(refreshToken);
+        persistAll();
+    }
+
+    /** 把当前快麦全部配置（6 字段）写入 kuaimai-config.json，供重启后覆盖默认值。 */
+    public void persistAll() {
         try {
             File f = configFile();
             f.getParentFile().mkdirs();
+            AppProperties.Kuaimai km = appProperties.getKuaimai();
             Map<String, String> m = new LinkedHashMap<>();
-            m.put("accessToken", accessToken);
-            m.put("refreshToken", refreshToken);
+            m.put("appKey", km.getAppKey());
+            m.put("appSecret", km.getAppSecret());
+            m.put("accessToken", km.getAccessToken());
+            m.put("refreshToken", km.getRefreshToken());
+            m.put("companyId", km.getCompanyId());
+            m.put("appTitle", km.getAppTitle());
             objectMapper.writeValue(f, m);
         } catch (Exception e) {
-            log.warn("持久化快麦 token 失败: {}", e.getMessage());
+            log.warn("持久化快麦配置失败: {}", e.getMessage());
         }
     }
 

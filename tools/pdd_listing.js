@@ -247,13 +247,24 @@ async function detectListingVersion(page) {
             const hasSelectCategoryBtn = !![...document.querySelectorAll('button,a,span,div')]
                 .find(el => (el.textContent || '').replace(/\s+/g, '') === '选择分类' && el.offsetParent !== null);
             return { hasCatSearch, hasTitleInput, hasConfirmCatBtn, hasSelectCategoryBtn,
-                     hasNextStep: has('完善商品信息') };
+                     hasNextStep: has('完善商品信息'),
+                     hasRecommendCat: has('推荐分类') || has('智能推荐') || has('为你推荐'),
+                     hasUploadMain: !!document.querySelector('.uploadImgEnter, input[type="file"]') };
         });
         log('版本检测信号: ' + JSON.stringify(sig) + ' url=' + url);
-        // 版本二：分类前置——进入即为「分类搜索页」(/goods/category，有分类搜索框/「确认发布该类商品」按钮，且还没有标题框)
-        if (/\/goods\/category/.test(url) || sig.hasCatSearch || sig.hasConfirmCatBtn) {
-            if (!sig.hasTitleInput) return 'v2';
+        // 注意：v2 与 v3 初始 URL 都是 /goods/category，不能只靠 URL 区分，必须看页面元素。
+        // 版本二：分类前置——进入即为「分类搜索页」（有分类搜索框 或「确认发布该类商品」按钮，且还没标题框）。
+        if ((sig.hasCatSearch || sig.hasConfirmCatBtn) && !sig.hasTitleInput) {
+            return 'v2';
         }
+        // 版本三：先传主图→后台推荐分类。进入即为「主图上传页」：在 /goods/category 但呈现上传区，
+        // 且没有分类搜索框/确认按钮/标题框（「推荐分类」是传图后才出现，初始检测不到，故不依赖它）。
+        if (/\/goods\/category/.test(url)
+            && sig.hasUploadMain && !sig.hasCatSearch && !sig.hasConfirmCatBtn && !sig.hasTitleInput) {
+            return 'v3';
+        }
+        // v3 兜底：已传主图、出现推荐分类信号、仍无标题框。
+        if (sig.hasUploadMain && sig.hasRecommendCat && !sig.hasTitleInput) return 'v3';
         // 版本一：单页表单（先主图/标题，分类是表单内「选择分类」弹框 + 「完善商品信息」下一步）
         return 'v1';
     } catch (e) {
@@ -407,10 +418,120 @@ async function main() {
         await closePddPopups();
 
         // ── STEP 1.4：检测上架页版本（不同店铺/账号页面布局不同）。先判版本再决定后续填充流程。──
-        //   new   = 新版单页表单（主图→标题→「选择分类」弹框→「下一步,完善商品信息」）
-        //   legacy= 旧版（最初那版，类目前置/整页表单）。两版在属性/SKU/价格段大体一致，差异在第一段。
-        const listingVersion = await detectListingVersion(page);
-        log('上架页版本判定: ' + listingVersion);
+        //   v1 = 单页表单（主图→标题→「选择分类」弹框→「下一步,完善商品信息」）
+        //   v2 = 分类前置（进入即 /goods/category：先搜分类→「确认发布该类商品」进表单）
+        //   v3 = 先传主图→后台自动推荐分类→点「取消」→手动选分类→「下一步,完善商品信息」（主图不重传）
+        // config.listingVersion 可强制指定（'v1'/'v2'/'v3'），否则自动检测。
+        const listingVersion = (config.listingVersion && /^v[123]$/.test(config.listingVersion))
+            ? config.listingVersion
+            : await detectListingVersion(page);
+        log('上架页版本判定: ' + listingVersion + (config.listingVersion ? '（配置强制）' : '（自动检测）'));
+
+        // ── 版本三（v3）：先传主图 → 取消后台自动推荐分类 → 手动选分类 → 下一步进表单（主图不重传）──
+        let v3Done = false;
+        if (listingVersion === 'v3') {
+            try {
+                // 1) 先传主图
+                if (config.mainImgDir) {
+                    const n = await uploadImagesToArea(page, 0, config.mainImgDir);
+                    log(`v3 主图上传完成，共 ${n} 张`);
+                    await page.waitForTimeout(2000);
+                    await closePddPopups();
+                }
+                // 2) 后台自动推荐分类 → 点「取消」以便手动选准确分类
+                try {
+                    const cancelBtn = page.locator('button:has-text("取消"), [class*="btn"]:has-text("取消")').first();
+                    await cancelBtn.click({ force: true, timeout: 4000 });
+                    log('v3 已点「取消」自动推荐分类');
+                    await page.waitForTimeout(1200);
+                } catch (_) { log('v3 未出现自动推荐分类「取消」按钮（跳过）'); }
+                // 3) 手动选商品分类（复用 v2 的分类搜索弹框逻辑：搜词→点 .c-name 末级）
+                if (config.category) {
+                    const keyword = config.category.split('>').pop().trim();
+                    // 打开分类选择（若有「选择分类」入口先点开）
+                    try {
+                        const selEntry = page.locator('text=选择分类, [class*="select"]:has-text("选择分类")').first();
+                        await selEntry.click({ force: true, timeout: 3000 });
+                        await page.waitForTimeout(800);
+                    } catch (_) {}
+                    const catInput = await page.$('input[placeholder*="搜索分类"], input[placeholder*="请输入"], input[placeholder*="类目"]');
+                    if (catInput) {
+                        await catInput.click({ force: true });
+                        await catInput.type(keyword, { delay: 80 });
+                        // 显式等搜索结果项出现（含关键词的 .c-name 或结果项），最多 6s，比死等更稳
+                        await page.waitForFunction((kw) => {
+                            const els = [...document.querySelectorAll('.c-name, li, [class*="item"], [class*="option"], [class*="result"]')];
+                            return els.some(el => el.offsetParent !== null && (el.textContent || '').replace(/\s+/g, '').includes(kw));
+                        }, keyword, { timeout: 6000 }).catch(() => {});
+                        await page.waitForTimeout(500);
+                    }
+                    let picked = false;
+                    try {
+                        const ok = await page.evaluate((kw) => {
+                            // 末级名优先在 .c-name，找不到则扫所有结果项元素
+                            let names = [...document.querySelectorAll('.c-name')];
+                            if (!names.length) {
+                                names = [...document.querySelectorAll('li,[class*="item"],[class*="option"],[class*="result"],[class*="cell"],[class*="cat"]')]
+                                    .filter(el => el.offsetParent !== null && (el.textContent || '').trim().length > 0 && (el.textContent || '').trim().length < 60);
+                            }
+                            const norm = s => (s || '').trim().replace(/\s+/g, '');
+                            // 先精确末级匹配，再退化到包含匹配
+                            let hit = names.find(el => norm(el.textContent).endsWith(kw));
+                            if (!hit) hit = names.find(el => norm(el.textContent).includes(kw));
+                            if (!hit) return false;
+                            let t = hit;
+                            for (let i = 0; i < 5 && t.parentElement; i++) {
+                                const c = (t.className || '') + '';
+                                if (t.tagName === 'LI' || /item|option|result|cell|row|cat/i.test(c)) break;
+                                t = t.parentElement;
+                            }
+                            (t || hit).click();
+                            return true;
+                        }, keyword);
+                        picked = ok;
+                    } catch (_) {}
+                    if (!picked) { try { await page.locator('.c-name', { hasText: keyword }).first().click({ force: true, timeout: 2000 }); picked = true; } catch (_) {} }
+                    if (!picked) {
+                        // 兜底：文本节点精确匹配
+                        const elH = await page.evaluateHandle((kw) => {
+                            const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                            let n; while ((n = w.nextNode())) { if (n.nodeValue.trim() === kw) { let e=n.parentElement; while(e&&e.tagName==='SPAN')e=e.parentElement; return e; } }
+                            return null;
+                        }, keyword);
+                        const el = elH.asElement();
+                        if (el) { await el.click({ force: true }); picked = true; }
+                    }
+                    log('v3 分类点选: ' + keyword + (picked ? ' 成功' : ' 未命中'));
+                    if (dryRun) { await page.screenshot({ path: 'step_v3_cat_picked.png' }); log('截图: step_v3_cat_picked.png'); }
+                    await page.waitForTimeout(1000);
+                }
+                // 4) 点「下一步，完善商品信息」进表单
+                let entered = false;
+                for (let a = 0; a < 3 && !entered; a++) {
+                    try {
+                        const nextBtn = page.locator('button:has-text("完善商品信息"), button:has-text("下一步"), [class*="btn"]:has-text("下一步")').first();
+                        await nextBtn.click({ force: true, timeout: 4000 }).catch(async () => {
+                            await page.evaluate(() => {
+                                const b = [...document.querySelectorAll('button,a,[role=button]')].find(e => /完善商品信息|下一步/.test(e.textContent || '') && e.offsetParent !== null);
+                                if (b) b.click();
+                            });
+                        });
+                        entered = await page.waitForFunction(() =>
+                            !!document.querySelector('input[placeholder*="标题"], textarea[placeholder*="标题"]') ||
+                            !!document.querySelector('[data-testid="beast-core-select-htmlInput"]'),
+                            { timeout: 10000 }).then(() => true).catch(() => false);
+                        if (!entered) log(`v3 点下一步后未进表单，重试 ${a + 1}`);
+                    } catch (e) { log(`v3 下一步重试 ${a + 1}: ${e.message.split('\n')[0]}`); await page.waitForTimeout(1500); }
+                }
+                if (!entered) error('v3 未能进入完善商品信息表单：请确认分类已选中、「下一步,完善商品信息」可点');
+                log('v3 已进入完善商品信息表单（主图已在前面上传，不重传）');
+                await closePddPopups();
+                v3Done = true;
+            } catch (e) {
+                error('v3 流程失败：' + e.message.split('\n')[0]);
+            }
+            if (dryRun) { await page.screenshot({ path: 'step_v3_form.png' }); log('截图: step_v3_form.png'); }
+        }
 
         // ── 版本二（v2）：分类前置。进入即为分类搜索页(/goods/category)：先搜分类→点「确认发布该类商品」进表单 ──
         let v2CategoryDone = false;
@@ -422,7 +543,12 @@ async function main() {
                     await catInput.click({ force: true });
                     await page.waitForTimeout(300);
                     await catInput.type(keyword, { delay: 80 });
-                    await page.waitForTimeout(2500);
+                    // 显式等搜索结果项出现（含关键词），最多 6s
+                    await page.waitForFunction((kw) => {
+                        const els = [...document.querySelectorAll('.c-name, li, [class*="item"], [class*="option"], [class*="result"]')];
+                        return els.some(el => el.offsetParent !== null && (el.textContent || '').replace(/\s+/g, '').includes(kw));
+                    }, keyword, { timeout: 6000 }).catch(() => {});
+                    await page.waitForTimeout(500);
                     // 点选末级分类。结果项是「完整路径 ... > 花洒喷头」整条可点；点「以关键词结尾的整条结果项」。
                     // 末级名在 <div class="c-name">花洒喷头</div>，点它或其可点击父项都能选中。
                     let picked = false;
@@ -534,12 +660,14 @@ async function main() {
         await page.waitForTimeout(500);
         if (dryRun) { await page.screenshot({ path: 'step1_add_page.png' }); log('截图已保存: step1_add_page.png'); }
 
-        // ── STEP 2：上传主图（新版流程：先传主图）────────────────────────
+        // ── STEP 2：上传主图（v3 已在前置步骤传过，跳过不重传）────────────────────────
         progress(15, '上传主图');
-        if (config.mainImgDir) {
+        if (config.mainImgDir && !v3Done) {
             const count = await uploadImagesToArea(page, 0, config.mainImgDir);
             log(`主图上传完成，共 ${count} 张`);
             await closePddPopups();
+        } else if (v3Done) {
+            log('v3：主图已在前置步骤上传，跳过');
         }
         progress(25, '主图上传完成');
         if (dryRun) { await page.screenshot({ path: 'step2_main_imgs.png' }); log('截图已保存: step2_main_imgs.png'); }
@@ -569,7 +697,7 @@ async function main() {
         //    版本二已在前置分类页选过(v2CategoryDone)，跳过本步。
         progress(38, '选择商品分类');
         const category = config.category || '';
-        if (category && !v2CategoryDone) {
+        if (category && !v2CategoryDone && !v3Done) {
             const keyword = category.split('>').pop().trim();
             // 1) 点开「选择分类」按钮
             let opened = false;
@@ -601,7 +729,12 @@ async function main() {
                 await catInput.click({ force: true });
                 await page.waitForTimeout(300);
                 await catInput.type(keyword, { delay: 80 });
-                await page.waitForTimeout(2500);
+                // 显式等搜索结果项出现（含关键词），最多 6s
+                await page.waitForFunction((kw) => {
+                    const els = [...document.querySelectorAll('[class*="searchItem"], [class*="search-item"], [role="dialog"] li, [class*="modal"] li, .c-name')];
+                    return els.some(el => el.offsetParent !== null && (el.textContent || '').replace(/\s+/g, '').includes(kw));
+                }, keyword, { timeout: 6000 }).catch(() => {});
+                await page.waitForTimeout(500);
 
                 // 3) 在弹框结果里点选末级类目（按文字精确匹配）
                 let clicked = false;
@@ -652,8 +785,9 @@ async function main() {
         if (dryRun) { await page.screenshot({ path: 'step4_category.png' }); log('截图已保存: step4_category.png'); }
 
         // ── STEP 4.5：点「下一步，完善商品信息」进入第二段表单（新版两段式发布）──
+        //    v3 已在前置步骤点过「下一步」进表单，跳过。
         progress(42, '进入完善商品信息');
-        try {
+        if (!v3Done) try {
             // 按钮文字可能是「下一步，完善商品信息」/「下一步」/「完善商品信息」
             let nextClicked = false;
             const nextBtn = page.locator('button:has-text("完善商品信息"), button:has-text("下一步"), [class*="btn"]:has-text("下一步")').first();
@@ -825,6 +959,13 @@ async function main() {
                 const sku = config.skus[i];
                 await humanDelay(300, 600);
 
+                // 先等 init-loading 遮罩消失，避免它拦截点击导致「Element is not attached / intercepts pointer events」
+                await page.waitForFunction(
+                    () => !document.querySelector('.init-loading, [class*="init-loading"]'),
+                    { timeout: 8000 }
+                ).catch(() => {});
+
+                try {
                 // 规格名输入框也是虚拟滚动：先滚到规格区底部，触发新空框渲染
                 await page.evaluate(() => {
                     const section = document.getElementById('goods-spec-sku');
@@ -899,6 +1040,24 @@ async function main() {
                     }
                 }
                 await humanDelay(200, 400);
+
+                // 写后校验回读：React 受控框偶发吞首字/异步覆盖，回读不符则重写一次
+                try {
+                    const actual = await inp.evaluate(el => el.value).catch(() => null);
+                    if (actual != null && actual.replace(/\s+/g, '') !== sku.name.replace(/\s+/g, '')) {
+                        log(`第${i+1}个规格值回读不符（期望「${sku.name}」实际「${actual}」），重写一次`);
+                        await inp.evaluate((el, val) => {
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                            setter.call(el, '');
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            setter.call(el, val);
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }, sku.name).catch(() => {});
+                        await humanDelay(150, 300);
+                    }
+                } catch (_) {}
+
                 await inp.press('Enter').catch(() => {});
 
                 // 等待新的空输入框出现（最多 3 秒），确认 Enter 已触发新行
@@ -911,6 +1070,9 @@ async function main() {
                 }
                 await humanDelay(300, 500);
                 log('规格值已填写: ' + sku.name);
+                } catch (e) {
+                    log(`第${i+1}个规格值填写异常，跳过继续: ${e.message.split('\n')[0]}`);
+                }
             }
 
             // 填完最后一个规格值后点击页面其他区域，触发失焦让最后一行 SKU 显示

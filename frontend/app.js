@@ -751,7 +751,7 @@ function siCellHtml(im) {
     const inner = im.loading
         ? `<div style="width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--surface-alt);border-radius:6px;color:var(--text-dim);font-size:0.7rem;">⏳ 生成中…</div>`
         : ok
-            ? `<img src="${src}" loading="lazy" decoding="async" onload="this.style.opacity=1" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:var(--surface-alt);opacity:0;transition:opacity .25s;">`
+            ? `<img src="${src}" loading="lazy" decoding="async" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:var(--surface-alt);">`
             : `<div style="width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--surface-alt);border-radius:6px;color:#dc2626;font-size:0.7rem;text-align:center;padding:6px;">${ecEscAttr(im.error||'失败')}</div>`;
     return `<div id="siCell_${idx}" style="display:flex;flex-direction:column;gap:4px;">
         ${inner}
@@ -2325,21 +2325,30 @@ async function erpLoadConfig() {
     try {
         const resp = await fetch('/api/erp/config');
         const data = await resp.json();
-        const el = document.getElementById('erpConfigAppKey');
-        if (el) el.textContent = data.appKey || '';
-        const at = document.getElementById('erpConfigAccessToken');
-        if (at) at.value = data.accessToken || '';
+        const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+        setVal('erpConfigAppKey',       data.appKey);
+        setVal('erpConfigAppSecret',    data.appSecret);
+        setVal('erpConfigAccessToken',  data.accessToken);
+        setVal('erpConfigRefreshToken', data.refreshToken);
+        setVal('erpConfigCompanyId',    data.companyId);
+        setVal('erpConfigAppTitle',     data.appTitle);
     } catch (_) {}
 }
 
 async function erpSaveConfig() {
-    const accessToken  = document.getElementById('erpConfigAccessToken')?.value.trim();
-    const refreshToken = document.getElementById('erpConfigRefreshToken')?.value.trim();
+    const val = id => document.getElementById(id)?.value.trim() || '';
+    const appKey       = val('erpConfigAppKey');
+    const appSecret    = val('erpConfigAppSecret');
+    const accessToken  = val('erpConfigAccessToken');
+    const refreshToken = val('erpConfigRefreshToken');
+    const companyId    = val('erpConfigCompanyId');
+    const appTitle     = val('erpConfigAppTitle');
+    if (!appKey)      { alert('请填写 AppKey'); return; }
     if (!accessToken) { alert('请填写 accessToken'); return; }
     try {
         await fetch('/api/erp/config', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accessToken, refreshToken })
+            body: JSON.stringify({ appKey, appSecret, accessToken, refreshToken, companyId, appTitle })
         });
         alert('保存成功');
     } catch (e) { alert('保存失败：' + e.message); }
