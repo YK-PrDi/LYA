@@ -1,4 +1,5 @@
 {
+  "_v": 2,
   "byCategory": {
     "花洒喷头": {
       "accessories": [
@@ -29,7 +30,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -53,7 +54,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -77,7 +78,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -101,7 +102,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -125,7 +126,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -149,7 +150,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -173,7 +174,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -197,7 +198,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -221,7 +222,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -245,7 +246,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -269,7 +270,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -293,7 +294,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -317,7 +318,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -341,7 +342,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -365,7 +366,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -389,7 +390,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -413,7 +414,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -437,7 +438,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -461,7 +462,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -485,7 +486,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -509,7 +510,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -533,7 +534,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -557,7 +558,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -581,7 +582,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -605,7 +606,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -624,7 +625,7 @@
     "GF-112-银色花酒": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -643,7 +644,7 @@
     "GF-111-银花洒": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -662,7 +663,7 @@
     "057灰单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -681,7 +682,7 @@
     "057白单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -700,7 +701,7 @@
     "057银单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -719,7 +720,7 @@
     "057黑单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -738,7 +739,7 @@
     "316灰单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -757,7 +758,7 @@
     "316银单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -776,7 +777,7 @@
     "316黑单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -795,7 +796,7 @@
     "323灰单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -814,7 +815,7 @@
     "323银单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -833,7 +834,7 @@
     "323黑单手喷": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -857,7 +858,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -881,7 +882,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -905,7 +906,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -929,7 +930,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -953,7 +954,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -977,7 +978,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1001,7 +1002,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1025,7 +1026,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1049,7 +1050,7 @@
           "defaultQty": 5
         },
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1068,7 +1069,7 @@
     "GF-标签香薰花洒-木兰花": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1087,7 +1088,7 @@
     "GF-标签香薰花洒-玫瑰": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },
@@ -1106,7 +1107,7 @@
     "GF-标签香薰花洒-薰衣草": {
       "accessories": [
         {
-          "keyword": "底座",
+          "keyword": "银底座",
           "role": "accessory",
           "defaultQty": 1
         },

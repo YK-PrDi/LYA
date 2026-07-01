@@ -1,0 +1,443 @@
+{
+  "_v": 1,
+  "家装主材 > 卫浴配件 > 花洒配件 > 花洒喷头": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [
+        "塑料",
+        "不锈钢",
+        "碳钢"
+      ],
+      "manual": true
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "水效等级",
+      "value": "一级",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "功能特点",
+      "value": "过滤、调档、可调档",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "适用人群",
+      "value": "通用",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "耐腐蚀性能",
+      "value": "1级",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "主体水路材质",
+      "value": "",
+      "options": [
+        "塑料",
+        "不锈钢"
+      ],
+      "manual": true
+    },
+    {
+      "name": "主体外壳材质",
+      "value": "",
+      "options": [
+        "塑料",
+        "不锈钢"
+      ],
+      "manual": true
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "冷热水控制类型",
+      "value": "单把双控",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "安装方式",
+      "value": "挂墙式",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "支架类型",
+      "value": "固定支架",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "是否支持智能",
+      "value": "不支持",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "水效等级",
+      "value": "一级",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "功能特点",
+      "value": "增压、过滤、可调档",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "花洒类型",
+      "value": "单花洒龙头",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "形状",
+      "value": "方形",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 厨房 > 厨房挂件 > 置物架": [
+    {
+      "name": "产品类型",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "使用对象",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "摆放类别",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "是否带移动滚轮",
+      "value": "不带移动滚轮",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "高度是否可调",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "是否可折叠",
+      "value": "不可折叠",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 卫浴用品 > 卫浴五金/挂件 > 卷纸器/纸巾架": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "安装方式",
+      "value": "挂墙式",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "适用纸巾",
+      "value": "卷纸",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "使用方式",
+      "value": "下开口抽纸",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 厨房 > 厨房挂件 > 锅盖架": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "摆放类别",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "安装方式",
+      "value": "免打孔",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "是否可折叠",
+      "value": "不可折叠",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "层数",
+      "value": "3层",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 卫浴用品 > 卫浴五金/挂件 > 浴室角架": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "安装方式",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "使用对象",
+      "value": "肥皂",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "层数",
+      "value": "1层",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 厨房 > 厨房挂件 > 刀架": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "摆放类别",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "安装方式",
+      "value": "免打孔",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "功能",
+      "value": "可沥水、风干",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 厨房 > 水槽配件 > 水槽下水器": [
+    {
+      "name": "材质种类",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "拉丝",
+      "options": [],
+      "manual": false
+    }
+  ],
+  "家装主材 > 卫浴用品 > 卫浴五金/挂件 > 挂钩/挂衣钩": [
+    {
+      "name": "材质",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "安装方式",
+      "value": "",
+      "options": [],
+      "manual": true
+    },
+    {
+      "name": "承重",
+      "value": "1kg以下",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "风格",
+      "value": "简约现代",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "表面工艺",
+      "value": "烤漆",
+      "options": [],
+      "manual": false
+    },
+    {
+      "name": "产地",
+      "value": "中国大陆",
+      "options": [],
+      "manual": false
+    }
+  ]
+}

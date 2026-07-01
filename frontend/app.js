@@ -209,13 +209,15 @@ async function lstLoadProductInfo() {
         const resp = await fetch('/api/listing/product-info?category=' + encodeURIComponent(cat));
         const data = await resp.json();
         const attrs = data.attributes || [];
+        console.log('[产品信息] 品类=' + cat + ' 预设属性数=' + attrs.length);
         lstAttributes = attrs.map(a => ({
             name: a.name || '',
             value: a.value || '',
             options: a.options || [],
             manual: !!a.manual
         }));
-    } catch (_) {
+    } catch (e) {
+        console.warn('[产品信息] 加载失败，仅用材质兜底:', e.message);
         lstAttributes = [];
     }
     // 强制材质默认塑料：有「材质」属性但空则填塑料；没有则新增一个默认塑料
@@ -291,17 +293,25 @@ function lstRenderSkuList() {
         const imgOk = sku.imgDir ? '✓' : '✗';
         const imgColor = sku.imgDir ? 'var(--primary)' : '#ef4444';
         const dispName = sku.skuDisplayName || sku.name || '';
+        // 白底图状态：缺则红色提示（快麦取或手动导入后填充 whiteImgDir）
+        const wbOk = sku.whiteImgDir ? '⬜✓' : '⬜✗缺白底图';
+        const wbColor = sku.whiteImgDir ? 'var(--primary)' : '#ef4444';
         return `
         <div style="display:grid;grid-template-columns:18px 1.4fr 1fr 70px 70px 60px 1fr;gap:5px;align-items:center;padding:5px 8px;background:var(--surface-alt);border-radius:6px;">
             <span style="font-size:0.66rem;color:var(--text-dim);text-align:right;">${i + 1}</span>
             <input type="text" value="${ecEscAttr(dispName)}" oninput="lstSkuEdit(${i},'skuDisplayName',this.value)" placeholder="款式名" title="${ecEscAttr(sku.name)}" style="${ip}">
-            <span style="color:${imgColor};font-size:0.66rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ecEscAttr(sku.imgDir)}">${imgOk} ${ecEscAttr(imgName)}</span>
+            <span style="font-size:0.66rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                <span style="color:${imgColor};" title="${ecEscAttr(sku.imgDir)}">${imgOk} ${ecEscAttr(imgName)}</span>
+                <span style="color:${wbColor};margin-left:4px;" title="白底图：${ecEscAttr(sku.whiteImgDir||'无')}">${wbOk}</span>
+            </span>
             <input type="number" step="0.01" value="${(+sku.groupPrice||0).toFixed(2)}" oninput="lstSkuEdit(${i},'groupPrice',this.value)" title="拼单价" style="${ip}">
             <input type="number" step="0.01" value="${(+sku.singlePrice||0).toFixed(2)}" oninput="lstSkuEdit(${i},'singlePrice',this.value)" title="单买价" style="${ip}">
             <input type="number" value="${sku.stock||8888}" oninput="lstSkuEdit(${i},'stock',this.value)" title="库存" style="${ip}">
             <input type="text" value="${ecEscAttr(sku.itemCode||'')}" oninput="lstSkuEdit(${i},'itemCode',this.value)" placeholder="编码" style="${ip}">
         </div>`;
     }).join('');
+    // SKU 图缩略图统一在左侧预览区，随 SKU 数据变化刷新
+    if (typeof lstRenderImgPreview === 'function') lstRenderImgPreview();
 }
 
 function lstSkuEdit(idx, field, val) {
@@ -414,7 +424,30 @@ async function saveRules() {
     } catch (e) { alert('保存失败：' + e.message); }
 }
 
-// ── 防比价模板 ──
+// ── 产品信息预设库编辑 ──
+async function openProductInfoEditor() {
+    try {
+        const resp = await fetch('/api/listing/product-info-presets');
+        const txt = await resp.text();
+        document.getElementById('piPresetJson').value = JSON.stringify(JSON.parse(txt), null, 2);
+    } catch (e) { document.getElementById('piPresetJson').value = '{}'; }
+    document.getElementById('piPresetModal')?.classList.add('show');
+}
+function closeProductInfoEditor() { document.getElementById('piPresetModal')?.classList.remove('show'); }
+async function saveProductInfoPresets() {
+    const txt = document.getElementById('piPresetJson').value;
+    try { JSON.parse(txt); } catch (e) { alert('JSON 格式错误：' + e.message); return; }
+    try {
+        const resp = await fetch('/api/listing/product-info-presets', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: txt
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        closeProductInfoEditor();
+        alert('产品信息预设已保存');
+        if (lstCatPath.length) lstLoadProductInfo();  // 立即重载当前品类预设
+    } catch (e) { alert('保存失败：' + e.message); }
+}
 let siTemplates = [];  // [{id,name,type,hasPortrait,prompt}]
 
 async function siLoadTemplates() {
@@ -874,6 +907,20 @@ async function lyAutoRun() {
                 }))
             }));
         }
+        // 配件型号锁定规则库：AI 只决定阶梯组合/数量，配件具体型号（滤芯001/052、底座、软管）
+        // 一律以规则库 accByKw 为准。把 AI 给的非规则 match 矫正回规则类型，防止 106 被配成 052 滤芯。
+        const ruleTypes = new Set((accSkus || []).map(a => a.type || a.keyword).filter(Boolean));
+        ladders = (ladders || []).map(ld => {
+            const comps = (ld.components || []).map(c => {
+                let m = c.match;
+                // AI 给的滤芯类（含"滤芯"字样但不是规则类型名）统一归一到规则类型 '滤芯'
+                if (!ruleTypes.has(m) && typeof m === 'string' && m.includes('滤芯')) m = '滤芯';
+                if (!ruleTypes.has(m) && typeof m === 'string' && m.includes('软管')) m = '软管';
+                if (!ruleTypes.has(m) && typeof m === 'string' && (m.includes('底座') || m.includes('支架'))) m = '底座';
+                return { match: m, qty: c.qty };
+            }).filter(c => ruleTypes.has(c.match));  // 规则库没有的配件类型直接丢弃（AI 幻觉配件）
+            return { name: ld.name, components: comps };
+        });
         // 兜底：AI 可能把「全配/全套/套装」型号的 components 漏填（只剩滤芯）。
         // 凡型号名含全配类词，就用 accSkus（该主件全部可用配件类型）补全缺失的配件，并把名字改写成具体配件。
         const allAccTypes = [...new Set((accSkus || []).map(a => a.type || a.keyword).filter(Boolean))];
@@ -915,7 +962,9 @@ async function lyAutoRun() {
             ladders.forEach(ld => {
                 const parts = (ld.components || []).map(c => {
                     const a = accByKw[c.match]; if (!a) return null;
-                    return { code: cleanAccCode(a.itemCode, c.match), qty: c.qty || a.defaultQty || 1, kw: c.match };
+                    const code = cleanAccCode(a.itemCode, c.match);
+                    if (c.match === '滤芯') console.log('[lyAuto滤芯] ' + main.itemCode + ' 规则滤芯单品=' + a.itemCode + ' → 编码=' + code);
+                    return { code, qty: c.qty || a.defaultQty || 1, kw: c.match };
                 }).filter(Boolean);
                 const codeStr = [main.itemCode].concat(parts.map(p => p.qty > 1 ? `${p.code}*${p.qty}` : p.code)).join('+');
                 items.push({
@@ -1020,6 +1069,47 @@ async function lstAutoMatchWhite(dir) {
     return n;
 }
 
+// 从快麦 ERP 取白底图（快麦优先，缺图提示用户手动补）。
+// 收集主件码(itemCode 第一段) + 所有配件码 → 后端下载到本地目录 → 复用 lstAutoMatchWhite 匹配。
+async function lstFetchWhiteFromErp(opts) {
+    const silent = opts && opts.silent;
+    if (!lstSkuItems.length) { if (!silent) alert('请先确认 SKU 布局'); return; }
+    const codes = new Set();
+    lstSkuItems.forEach(s => {
+        const mainCode = (s.itemCode || '').split('+')[0].trim();
+        if (mainCode) codes.add(mainCode);
+        (s.accParts || []).forEach(p => { if (p.code) codes.add(p.code); });
+    });
+    if (!codes.size) { if (!silent) alert('没有可查的编码（请先完成搭配/定价）'); return; }
+    try {
+        const resp = await fetch('/api/erp/fetch-white-images', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codes: [...codes] })
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        const wd = document.getElementById('lstWhiteImgDir');
+        if (wd) wd.value = data.whiteDir || '';
+        const n = data.whiteDir ? await lstAutoMatchWhite(data.whiteDir) : 0;
+        lstRenderSkuList();
+        const missing = data.missing || [];
+        if (missing.length) {
+            console.warn('快麦缺白底图:', missing.join('、'));
+            // 缺图始终弹窗引导（即使 silent 自动触发）：去快麦补图刷新，或手动导入
+            alert(`快麦白底图：已取 ${(data.matched || []).length} 张，匹配 ${n}/${lstSkuItems.length}\n\n`
+                + `⚠ 以下编码快麦没有白底图：\n${missing.join('、')}\n\n`
+                + `补图二选一：\n`
+                + `① 去快麦 ERP 给这些单品上传白底图，再点「🔄」刷新缓存后重新「📥 从快麦取白底图」\n`
+                + `② 点「⬜ 导入白底图」手动选本地图`);
+        } else if (!silent) {
+            alert(`快麦白底图：已取 ${(data.matched || []).length} 张，匹配主件 ${n}/${lstSkuItems.length}`);
+        }
+    } catch (e) {
+        if (!silent) alert('从快麦取白底图失败：' + e.message);
+        else console.warn('从快麦取白底图失败:', e.message);
+    }
+}
+
 async function lstImportWhite() {
     if (!lstSkuItems.length) { alert('请先确认 SKU 布局'); return; }
     let dir = '';
@@ -1099,10 +1189,45 @@ async function lstImportSkuImages() {
 // ── SKU 方案工作台 ──
 let spPlans = [];
 let spActiveIdx = 0;
+let spRuleByMainCode = {};   // 规则库 byMainCode 缓存：主件码 → {accessories:[{keyword,role,defaultQty}]}
+
+// 加载配件规则库（供 spConfirm 锁定 AI 配件型号）。失败不阻断，置空。
+async function spLoadRules() {
+    try {
+        const resp = await fetch('/api/listing/accessory-rules');
+        const data = await resp.json();
+        const root = (data && data.json) ? JSON.parse(data.json) : data;
+        spRuleByMainCode = (root && root.byMainCode) || {};
+        console.log('[配件规则] 已加载 byMainCode 主件数=' + Object.keys(spRuleByMainCode).length);
+    } catch (e) { spRuleByMainCode = {}; console.warn('[配件规则] 加载失败:', e.message); }
+}
+
+// 取某主件规则库指定的滤芯关键字（如 "001滤芯"）。无规则返回 ''。
+// 主件码可能与规则库 key 不完全一致（AI 可能改写），故精确→去尾段→双向包含三级匹配。
+function spRuleFilterKw(mainCode) {
+    let rule = spRuleByMainCode[mainCode];
+    if (!rule) {
+        const keys = Object.keys(spRuleByMainCode);
+        // 去掉单卖后缀 -数字 再精确
+        const base = String(mainCode || '').replace(/-\d+$/, '');
+        let k = keys.find(x => x === base || x.replace(/-\d+$/, '') === base);
+        // 双向包含兜底（如 mainCode 含规则 key 或反之）
+        if (!k) k = keys.find(x => mainCode && (mainCode.includes(x) || x.includes(mainCode)));
+        if (k) rule = spRuleByMainCode[k];
+    }
+    if (!rule || !Array.isArray(rule.accessories)) {
+        console.warn('[配件规则] 主件「' + mainCode + '」无规则，滤芯不矫正。已知主件示例:', Object.keys(spRuleByMainCode).slice(0, 3));
+        return '';
+    }
+    const f = rule.accessories.find(a => (a.keyword || '').includes('滤芯'));
+    console.log('[配件规则] 主件「' + mainCode + '」规则滤芯=' + (f ? f.keyword : '无'));
+    return f ? f.keyword : '';
+}
 
 function openSkuPlanModal() {
     const modal = document.getElementById('skuPlanModal');
     if (!modal) return;
+    spLoadRules();   // 打开工作台即预载规则库
     const catLabel = document.getElementById('spCategoryLabel');
     if (catLabel) catLabel.textContent = lstCatPath.length ? lstCatPath.join(' › ') : '—';
     modal.classList.add('show');
@@ -1203,13 +1328,13 @@ function spAccKw(code) {
 // 清洗配件编码：有的配件 ERP outerId 本身是组合套装串（如 "GF-001-纯白+1.5米银软管+银底座+001滤芯*10"），
 // 直接拼进规格编码会乱。按关键字(kw)抽取该串里对应的那一段作为干净配件码；不是组合串则原样返回。
 function cleanAccCode(rawCode, kw) {
-    const code = String(rawCode || '').trim();
-    if (!code.includes('+')) return code;          // 单码，直接用
-    const segs = code.split('+').map(s => s.trim()).filter(Boolean);
-    // 关键字 → 在分段里找含该字样的段（去掉 *N 数量后缀）
-    const kwHit = segs.find(s => kw && s.includes(kw));
-    const pick = (kwHit || segs[segs.length - 1]).replace(/\*\d+$/, '');
-    return pick;
+    let code = String(rawCode || '').trim();
+    if (code.includes('+')) {
+        const segs = code.split('+').map(s => s.trim()).filter(Boolean);
+        const kwHit = segs.find(s => kw && s.includes(kw));
+        code = kwHit || segs[segs.length - 1];
+    }
+    return code.replace(/\*\d+$/, '');   // 统一去掉 *N 数量后缀（ERP 滤芯单品编码自带如 052滤芯*15）
 }
 
 // 滤芯识别：名称含"滤芯"才允许调数量
@@ -1339,7 +1464,8 @@ function spAddModelComp(idx, ri, code) {
     const md = spPlans[idx].models[ri];
     md.components = md.components || [];
     const item = spItemByCode(code);
-    md.components.push({ itemCode: code, qty: (item && spIsFilter(item.name)) ? 5 : 1 });
+    // userAdded:true 标记用户手动加的配件，spConfirm 矫正时尊重用户选择、不锁规则库
+    md.components.push({ itemCode: code, qty: (item && spIsFilter(item.name)) ? 5 : 1, userAdded: true });
     spRenderTable(idx);
 }
 function spDelModelComp(idx, ri, ci) { spPlans[idx].models[ri].components.splice(ci, 1); spRenderTable(idx); }
@@ -1365,6 +1491,8 @@ async function spConfirm() {
     const btn = document.getElementById('spConfirmBtn');
     btn.disabled = true; btn.textContent = '计算成本中...';
     try {
+        // 确保配件规则库已加载（用于锁定 AI 滤芯型号），未加载则同步拉一次
+        if (!Object.keys(spRuleByMainCode).length) await spLoadRules();
         // 固定成本项（包材/纸箱），带成本
         const fixedAccessories = lstSkuItems.filter(s => s.isFixed)
             .map(s => ({ itemCode: s.itemCode, cost: parseFloat(s.cost) || 0 }));
@@ -1385,21 +1513,34 @@ async function spConfirm() {
             plan.models.forEach(md => {
                 // 规格编码 = 主件编码 + 各配件编码，用 + 连接；数量>1 的配件（如滤芯）用「码*数量」后缀，
                 // 与快麦组合装格式一致，如 GF-099不开窗-灰色+银底座+银色1.5米软管+052滤芯*5
+                // 配件锁规则库：AI 自动生成的滤芯按该主件规则库型号矫正（106→001）；userAdded 手动加的尊重用户。
+                const ruleFilterKw = spRuleFilterKw(m.itemCode);
+                const fixComp = (c) => {
+                    if (!c || !c.itemCode) return c;
+                    // 只矫正"非用户手动加"的滤芯类配件
+                    if (!c.userAdded && ruleFilterKw && spIsFilter(spItemByCode(c.itemCode)?.name || c.itemCode)) {
+                        if (c.itemCode !== ruleFilterKw) console.log('[配件矫正] ' + m.itemCode + ' 滤芯 ' + c.itemCode + ' → ' + ruleFilterKw);
+                        return { ...c, itemCode: ruleFilterKw };
+                    }
+                    return c;
+                };
+                const fixedComps = (md.components || []).map(fixComp);
                 const codeParts = [m.itemCode];
-                (md.components || []).forEach(c => {
-                    const code = c.itemCode;
+                fixedComps.forEach(c => {
+                    const code = cleanAccCode(c.itemCode, '滤芯');
                     if (!code) return;
                     const n = Math.max(1, parseInt(c.qty) || 1);
                     codeParts.push(n > 1 ? `${code}*${n}` : code);
                 });
                 const specCode = codeParts.filter(Boolean).join('+');
+                const mdFixed = { ...md, components: fixedComps };
                 cells.push({
                     itemCode: specCode,
                     spec1: m.specName || m.itemCode,
                     spec2: md.specName || '默认',
                     name: `${m.specName||m.itemCode} ${md.specName||''}`.trim(),
                     stock: 8888,
-                    components: cellComp(m.itemCode, md)
+                    components: cellComp(m.itemCode, mdFixed)
                 });
             });
         });
@@ -1495,7 +1636,7 @@ async function lstScanFolder(folderPath) {
         const lines = [];
         if (data.mainImgDir) lines.push(`✓ 主图：${data.mainImgDir}（用作生图参考）`); else lines.push('✗ 未找到主图文件夹（命名需含"主图"）');
         if (data.detailImgDir) lines.push(`✓ 详情图：${data.detailImgDir}`); else lines.push('✗ 未找到详情图文件夹（命名需含"详情"）');
-        if (data.whiteImgDir) lines.push(`✓ 白底图：${data.whiteImgDir}（自动匹配 SKU）`); else lines.push('✗ 未找到白底图文件夹（命名需含"白底"）');
+        if (data.whiteImgDir) lines.push(`✓ 白底图：${data.whiteImgDir}（自动匹配 SKU）`); else lines.push('· 白底图：可用「📥 从快麦取白底图」或「⬜ 导入白底图」获取');
         if (data.whiteImgDir) { try { await lstAutoMatchWhite(data.whiteImgDir); } catch (_) {} }
         status.innerHTML = lines.join('<br>');
         lstShowPreview();
@@ -1514,7 +1655,8 @@ async function lstRenderImgPreview() {
         { label: '详情图', dir: document.getElementById('lstDetailImgDir')?.value || '' },
         { label: '白底图', dir: document.getElementById('lstWhiteImgDir')?.value || '' },
     ].filter(g => g.dir);
-    if (!groups.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const hasSkuImg = (lstSkuItems || []).some(s => s.imgDir);
+    if (!groups.length && !hasSkuImg) { box.style.display = 'none'; box.innerHTML = ''; return; }
     box.style.display = 'block';
     box.innerHTML = '<div style="font-size:0.7rem;color:var(--text-dim);">加载预览…</div>';
 
@@ -1540,7 +1682,24 @@ async function lstRenderImgPreview() {
         </div>`;
     }));
     const html = sections.filter(Boolean).join('');
-    box.innerHTML = html || '<div style="font-size:0.7rem;color:var(--text-dim);">无可预览图片</div>';
+    // SKU 图组：数据源是各 SKU 的 imgDir（单文件路径，非目录），单独渲染
+    const skuImgs = (lstSkuItems || []).map(s => s.imgDir).filter(Boolean);
+    let skuHtml = '';
+    if (skuImgs.length) {
+        const MAX = 24;
+        const thumbs = skuImgs.slice(0, MAX).map(p =>
+            `<img src="/api/image?path=${encodeURIComponent(p)}&t=${Date.now()}" title="${ecEscAttr(p.replace(/.*[\\/]/, ''))}"
+                style="width:48px;height:48px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0;background:#fff;" onerror="this.style.visibility='hidden'">`
+        ).join('');
+        const more = skuImgs.length > MAX ? `<span style="font-size:0.66rem;color:var(--text-dim);align-self:center;">+${skuImgs.length - MAX}</span>` : '';
+        skuHtml = `<div style="margin-bottom:8px;">
+            <div style="font-size:0.7rem;color:var(--text-dim);margin-bottom:4px;">SKU图（${skuImgs.length}/${lstSkuItems.length}）</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;">${thumbs}${more}</div>
+        </div>`;
+    }
+    const finalHtml = skuHtml + html;
+    box.style.display = (finalHtml ? 'block' : 'none');
+    box.innerHTML = finalHtml || '<div style="font-size:0.7rem;color:var(--text-dim);">无可预览图片</div>';
 }
 
 function lstShowPreview() {
@@ -1866,9 +2025,11 @@ async function pmApply() {
     lstRenderSkuList();
     closePricingModal();
     document.getElementById('lstPreview').style.display = 'block';
+    // 搭配定价完成后自动查快麦白底图（静默，不弹窗；缺的在 SKU 列表红色标记）
+    if (typeof lstFetchWhiteFromErp === 'function') {
+        lstFetchWhiteFromErp({ silent: true }).catch(() => {});
+    }
 }
-
-// ── ERP 选品面板 ──
 
 let erpPage = 1;
 let erpKeyword = '';
@@ -1886,12 +2047,17 @@ function erpBumpUsage(code) {
     erpUsage[code] = (erpUsage[code] || 0) + 1;
     erpSaveUsage();
 }
-// 把行列表按常用计数降序置顶（计数相同/为0 保持原有相对顺序）
+// 把行列表排序：① 精确匹配搜索词的置顶（如搜"银底座"时纯"银底座"排在"银底座-1/-2"前）
+// ② 再按常用计数降序 ③ 计数相同保持原顺序
 function erpSortByUsage(rows) {
+    const q = (document.getElementById('erpSearchInput')?.value || '').trim().toLowerCase();
+    const isExact = (r) => q && (String(r.name || '').toLowerCase() === q || String(r.skuOuterId || '').toLowerCase() === q);
     return rows.map((r, i) => [r, i]).sort((a, b) => {
+        const ea = isExact(a[0]) ? 1 : 0, eb = isExact(b[0]) ? 1 : 0;
+        if (ea !== eb) return eb - ea;  // 精确匹配优先
         const ua = erpUsage[a[0].skuOuterId] || 0, ub = erpUsage[b[0].skuOuterId] || 0;
         if (ua !== ub) return ub - ua;
-        return a[1] - b[1];  // 稳定：计数相同按原顺序
+        return a[1] - b[1];  // 稳定：其余按原顺序
     }).map(x => x[0]);
 }
 
@@ -1953,6 +2119,11 @@ let erpItemsCache = {};
 let erpAllSkuRows = [];  // 累积所有已加载的单品行
 let erpTotalItems = 0;
 
+// 快麦图 URL 真实性：排除 no_pic 占位，非 http 视为无
+function erpRealPic(p) {
+    return (p && typeof p === 'string' && p.startsWith('http') && !p.includes('no_pic')) ? p : '';
+}
+
 function erpRenderList(data, append) {
     const items = data.items || [];
     erpTotalItems = typeof data.total === 'number' ? data.total : erpTotalItems;
@@ -1966,11 +2137,14 @@ function erpRenderList(data, append) {
             skus.forEach(sk => {
                 // 名称优先级：propertiesAlias > shortTitle > propertiesName > item.title
                 const name = (sk.propertiesAlias || sk.shortTitle || sk.propertiesName || item.title || '').trim();
+                // 白底图：SKU级 skuPicPath 优先，缺则商品级 picPath（no_pic 占位视为无）
+                const pic = erpRealPic(sk.skuPicPath) || erpRealPic(item.picPath) || '';
                 newRows.push({
                     sysItemId:    item.sysItemId,
                     skuOuterId:   sk.skuOuterId || '',
                     name:         name || sk.skuOuterId || item.outerId || '—',
                     productTitle: item.title || '',
+                    picPath:      pic,
                     purchasePrice: sk.purchasePrice != null ? sk.purchasePrice : (item.purchasePrice || 0),
                     weight:       sk.weight != null ? sk.weight : (item.weight || 0),
                     hasSupplier:  sk.hasSupplier != null ? sk.hasSupplier : (item.hasSupplier || 0)
@@ -1982,6 +2156,7 @@ function erpRenderList(data, append) {
                 skuOuterId:   item.outerId || '',
                 name:         item.shortTitle || item.title || item.outerId || '—',
                 productTitle: item.title || '',
+                picPath:      erpRealPic(item.picPath) || '',
                 purchasePrice: item.purchasePrice || 0,
                 weight:       item.weight || 0,
                 hasSupplier:  item.hasSupplier || 0
@@ -2020,8 +2195,12 @@ function renderErpRows() {
         const isChosen = erpSelectedSkus.some(s => s.itemCode === sk.skuOuterId);
         const chkStyle = isChosen ? 'background:var(--primary);color:#fff;' : '';
         const rowBg    = isChosen ? 'background:var(--primary-light);' : '';
+        const thumb = sk.picPath
+            ? `<img src="${ecEscAttr(sk.picPath)}" loading="lazy" style="width:38px;height:38px;object-fit:cover;border-radius:4px;border:1px solid var(--border);flex-shrink:0;background:#fff;" onerror="this.style.visibility='hidden'">`
+            : `<span style="width:38px;height:38px;border-radius:4px;border:1px dashed var(--border);flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:0.5rem;color:var(--text-dim);">无图</span>`;
         return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;cursor:pointer;${rowBg}" onclick="erpToggleSingleSku(${idx}, this)">
             <span id="erpSkuChk_${idx}" style="width:16px;height:16px;border:2px solid var(--border);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.6rem;${chkStyle}">${isChosen ? '✓' : ''}</span>
+            ${thumb}
             <span style="flex:1;font-size:0.78rem;font-weight:600;">${ecEscAttr(sk.name)}</span>
             ${usedTag}
             ${supplier}

@@ -206,31 +206,40 @@ public class ListingService {
         }
     }
 
-    /** 读取项目根目录 商品标题库.xlsx 的 A 列，每行一条标题。读不到返回空列表。 */
+    /** 商品标题库文件：userDataDir/title-lib.json。 */
+    private File titleLibFile() {
+        return new File(appProperties.getPaths().getUserDataDir(), "title-lib.json");
+    }
+
+    /** 读标题库 JSON 文本；版本化加载（classpath _v 更高则覆盖缓存）。 */
+    public synchronized String loadTitleLibJson() {
+        return PromptLoader.loadVersioned("prompt/title-lib.json", titleLibFile(), objectMapper);
+    }
+
+    /** 保存标题库 JSON（前端编辑器调用）。 */
+    public synchronized void saveTitleLibJson(String json) throws Exception {
+        File f = titleLibFile();
+        f.getParentFile().mkdirs();
+        java.nio.file.Files.write(f.toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** 读取商品标题库的 titles 数组（保留原始行序，含分组行供 titleRefByCategory 切分）。读不到返回空列表。 */
+    @SuppressWarnings("unchecked")
     private List<String> readTitleLib() {
-        List<String> titles = new ArrayList<>();
-        File f = new File(System.getProperty("user.dir"), "商品标题库.xlsx");
-        if (!f.isFile()) {
-            String rp = System.getProperty("app.resources-path");
-            if (rp != null && !rp.isBlank()) {
-                File rf = new File(rp, "商品标题库.xlsx");
-                if (rf.isFile()) f = rf;
+        try {
+            Map<String, Object> root = objectMapper.readValue(loadTitleLibJson(), Map.class);
+            Object t = root.get("titles");
+            List<String> titles = new ArrayList<>();
+            if (t instanceof List) {
+                for (Object o : (List<Object>) t) {
+                    if (o != null && !o.toString().trim().isEmpty()) titles.add(o.toString().trim());
+                }
             }
-        }
-        if (!f.isFile()) { log.warn("商品标题库.xlsx 未找到: {}", f.getAbsolutePath()); return titles; }
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(f);
-             org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(fis)) {
-            org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
-            for (int r = 0; r <= sheet.getLastRowNum(); r++) {
-                org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
-                if (row == null) continue;
-                String t = getCellStr(row.getCell(0)).trim();
-                if (!t.isEmpty()) titles.add(t);
-            }
+            return titles;
         } catch (Exception e) {
-            log.warn("读取标题库失败: {}", e.getMessage());
+            log.warn("解析标题库 JSON 失败: {}", e.getMessage());
+            return new ArrayList<>();
         }
-        return titles;
     }
 
     /**
@@ -254,76 +263,43 @@ public class ListingService {
         return picked.isEmpty() ? all : picked;
     }
 
+    /** 产品信息预设文件：userDataDir/product-info-presets.json（前端可编辑、运行时即时生效）。 */
+    private File productInfoFile() {
+        return new File(appProperties.getPaths().getUserDataDir(), "product-info-presets.json");
+    }
+
+    /** 读产品信息预设 JSON 文本；版本化加载（classpath _v 更高则覆盖缓存）。 */
+    public synchronized String loadProductInfoJson() {
+        return PromptLoader.loadVersioned("prompt/product-info-presets.json", productInfoFile(), objectMapper);
+    }
+
+    /** 保存产品信息预设 JSON（前端编辑器调用）。 */
+    public synchronized void saveProductInfoJson(String json) throws Exception {
+        File f = productInfoFile();
+        f.getParentFile().mkdirs();
+        java.nio.file.Files.write(f.toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     /**
-     * 解析 产品信息填写参考.xlsx：品类全路径 → 属性列表。
-     * 分组行含" > "切换品类；其余行按首个"："切分 name/value：
-     *   value 含"（人工选择）" → 去后缀按"/"拆 options、manual=true；
-     *   value=="人工选择" 或 无值 → manual=true、value 空；
-     *   否则固定预填值。
+     * 读产品信息预设：品类全路径 → 属性列表。
+     * 数据源 product-info-presets.json（结构：{"品类路径": [{name,value,options,manual}]}）。
      */
     @SuppressWarnings("unchecked")
     public Map<String, List<Map<String, Object>>> readProductInfoPresets() {
-        Map<String, List<Map<String, Object>>> presets = new LinkedHashMap<>();
-        File f = new File(System.getProperty("user.dir"), "产品信息填写参考.xlsx");
-        if (!f.isFile()) {
-            String rp = System.getProperty("app.resources-path");
-            if (rp != null && !rp.isBlank()) {
-                File rf = new File(rp, "产品信息填写参考.xlsx");
-                if (rf.isFile()) f = rf;
-            }
-        }
-        if (!f.isFile()) { log.warn("产品信息填写参考.xlsx 未找到: {}", f.getAbsolutePath()); return presets; }
-
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(f);
-             org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(fis)) {
-            org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
-            String curCat = null;
-            for (int r = 0; r <= sheet.getLastRowNum(); r++) {
-                org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
-                if (row == null) continue;
-                String line = getCellStr(row.getCell(0)).trim();
-                if (line.isEmpty()) continue;
-
-                if (line.contains(" > ") || line.contains(">")) {
-                    curCat = line.replace("　", " ").trim();
-                    presets.putIfAbsent(curCat, new ArrayList<>());
-                    continue;
+        try {
+            Map<String, Object> raw = objectMapper.readValue(loadProductInfoJson(), Map.class);
+            Map<String, List<Map<String, Object>>> presets = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : raw.entrySet()) {
+                if (e.getKey().startsWith("_")) continue;   // 跳过 _v 等元数据 key
+                if (e.getValue() instanceof List) {
+                    presets.put(e.getKey(), (List<Map<String, Object>>) e.getValue());
                 }
-                if (curCat == null) continue;
-
-                String name, value;
-                int idx = line.indexOf('：');
-                if (idx < 0) idx = line.indexOf(':');
-                if (idx >= 0) { name = line.substring(0, idx).trim(); value = line.substring(idx + 1).trim(); }
-                else { name = line.trim(); value = ""; }
-
-                Map<String, Object> attr = new LinkedHashMap<>();
-                attr.put("name", name);
-                List<String> options = new ArrayList<>();
-                boolean manual = false;
-                String fixed = "";
-
-                if (value.contains("人工选择") || value.contains("人工")) {
-                    manual = true;
-                    String opt = value.replace("（人工选择）", "").replace("(人工选择)", "")
-                                      .replace("人工选择", "").replace("人工", "").trim();
-                    if (!opt.isEmpty()) {
-                        for (String o : opt.split("/")) if (!o.trim().isEmpty()) options.add(o.trim());
-                    }
-                } else if (value.isEmpty()) {
-                    manual = true;
-                } else {
-                    fixed = value;
-                }
-                attr.put("value", fixed);
-                attr.put("options", options);
-                attr.put("manual", manual);
-                presets.get(curCat).add(attr);
             }
+            return presets;
         } catch (Exception e) {
-            log.warn("读取产品信息参考表失败: {}", e.getMessage());
+            log.warn("解析产品信息预设 JSON 失败: {}", e.getMessage());
+            return new LinkedHashMap<>();
         }
-        return presets;
     }
 
     /** 取某品类（全路径精确匹配）的预设属性，无匹配返回空列表。 */
@@ -693,16 +669,6 @@ public class ListingService {
         int end   = content.lastIndexOf('}');
         if (start >= 0 && end > start) content = content.substring(start, end + 1);
         return objectMapper.readValue(content, Map.class);
-    }
-
-    private String getCellStr(org.apache.poi.ss.usermodel.Cell cell) {
-        if (cell == null) return "";
-        return switch (cell.getCellType()) {
-            case STRING  -> cell.getStringCellValue();
-            case NUMERIC -> String.valueOf(cell.getNumericCellValue());
-            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
-            default      -> "";
-        };
     }
 
     private double getCellDouble(org.apache.poi.ss.usermodel.Cell cell) {

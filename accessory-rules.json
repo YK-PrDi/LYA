@@ -1,18 +1,1127 @@
 {
+  "_v": 2,
   "byCategory": {
     "花洒喷头": {
       "accessories": [
-        { "keyword": "软管", "role": "accessory", "defaultQty": 1 },
-        { "keyword": "底座", "role": "accessory", "defaultQty": 1 },
-        { "keyword": "滤芯", "role": "batch", "defaultQty": 5 }
-      ],
-      "ladders": [
-        { "name": "增压亲肤单喷头", "components": [] },
-        { "name": "喷头+1.5米防爆软管", "components": [{ "match": "软管", "qty": 1 }] },
-        { "name": "喷头+稳固银底座", "components": [{ "match": "底座", "qty": 1 }] },
-        { "name": "全配+5支过滤滤芯", "components": [{ "match": "滤芯", "qty": 5 }] }
+        {
+          "keyword": "软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        }
       ]
     }
   },
-  "byMainCode": {}
+  "byMainCode": {
+    "001白单手喷": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "001银单手喷": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "001银单手喷-1档带风扇": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "002银单手喷": {
+      "accessories": [
+        {
+          "keyword": "002滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "002黑单手喷": {
+      "accessories": [
+        {
+          "keyword": "002滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "002白单手喷": {
+      "accessories": [
+        {
+          "keyword": "002滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "002灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "002滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "017灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "017滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "017白单手喷": {
+      "accessories": [
+        {
+          "keyword": "017滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "017蓝单手喷": {
+      "accessories": [
+        {
+          "keyword": "017滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "017深蓝单手喷": {
+      "accessories": [
+        {
+          "keyword": "017滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "027灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "027白单花洒": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "027银单手喷": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "027黑单手喷": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-可视白色-027": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-可视银色-027": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "052灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "052透单手喷": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-099不开窗-灰色": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-099不开窗-银色": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-099不开窗-黑色": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-灰色-099": {
+      "accessories": [
+        {
+          "keyword": "052滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-101-银色": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-719-银色": {
+      "accessories": [
+        {
+          "keyword": "719滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-112-银色花酒": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-111-银花洒": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "057灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "057白单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "057银单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "057黑单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "316灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "316银单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "316黑单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "323灰单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "323银单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "323黑单手喷": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-125-奶白": {
+      "accessories": [
+        {
+          "keyword": "125滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-125-灰色": {
+      "accessories": [
+        {
+          "keyword": "125滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-125-银色": {
+      "accessories": [
+        {
+          "keyword": "125滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-125-黑色": {
+      "accessories": [
+        {
+          "keyword": "125滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-106-灰色": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-106-银色": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-106-黑色": {
+      "accessories": [
+        {
+          "keyword": "001滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-116-灰色花洒": {
+      "accessories": [
+        {
+          "keyword": "116滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-116-黑色花洒": {
+      "accessories": [
+        {
+          "keyword": "116滤芯",
+          "role": "batch",
+          "defaultQty": 5
+        },
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-标签香薰花洒-木兰花": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-标签香薰花洒-玫瑰": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    },
+    "GF-标签香薰花洒-薰衣草": {
+      "accessories": [
+        {
+          "keyword": "银底座",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色1.5米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        },
+        {
+          "keyword": "银色2米软管",
+          "role": "accessory",
+          "defaultQty": 1
+        }
+      ]
+    }
+  }
 }

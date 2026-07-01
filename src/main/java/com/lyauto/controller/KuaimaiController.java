@@ -107,6 +107,62 @@ public class KuaimaiController {
     }
 
     /**
+     * 从快麦 ERP 下载白底图到本地目录（与用户手动导入并行；快麦优先）。
+     * 入参: { codes: ["GF-106-银色", "001滤芯", "银底座", ...] }
+     * 出参: { whiteDir, matched:[{code,file}], missing:[code...] }
+     * 缺图的编码在 missing 里返回，前端提示用户用「导入白底图」手动补。
+     */
+    @PostMapping("/fetch-white-images")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> fetchWhiteImages(@RequestBody Map<String, Object> body) {
+        try {
+            List<String> codes = (List<String>) body.getOrDefault("codes", List.of());
+            if (codes.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "codes 不能为空"));
+            }
+            String userDir = appProperties.getPaths().getUserDataDir();
+            if (userDir == null || userDir.isBlank()) userDir = System.getProperty("user.dir");
+            java.io.File whiteDir = new java.io.File(userDir, "erp-white/" + System.currentTimeMillis());
+            whiteDir.mkdirs();
+
+            List<Map<String, Object>> matched = new ArrayList<>();
+            List<String> missing = new ArrayList<>();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+
+            for (String code : codes) {
+                if (code == null || code.isBlank() || !seen.add(code)) continue;
+                String url = kuaimaiService.findWhiteImageUrl(code);
+                if (url == null) { missing.add(code); continue; }
+                try {
+                    String safe = code.replaceAll("[\\\\/:*?\"<>|]", "_");
+                    String ext = url.toLowerCase().contains(".png") ? ".png" : ".jpg";
+                    java.io.File out = new java.io.File(whiteDir, safe + ext);
+                    try (java.io.InputStream in = new java.net.URL(url).openStream()) {
+                        java.nio.file.Files.copy(in, out.toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("code", code);
+                    m.put("file", out.getAbsolutePath());
+                    matched.add(m);
+                } catch (Exception e) {
+                    log.warn("下载快麦白底图失败 {} ({}): {}", code, url, e.getMessage());
+                    missing.add(code);
+                }
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("whiteDir", whiteDir.getAbsolutePath());
+            result.put("matched", matched);
+            result.put("missing", missing);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "获取快麦白底图失败：" + e.getMessage()));
+        }
+    }
+
+    /**
      * 查询单品列表，支持关键词过滤。首次调用触发并发预加载（约6-10秒），之后从缓存瞬时返回。
      * GET /api/erp/sku-items?keyword=银底座
      * POST /api/erp/sku-items/refresh  — 强制刷新缓存

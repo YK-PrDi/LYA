@@ -378,6 +378,36 @@ public class KuaimaiService {
 
     private String str(Object o) { return o == null ? "" : o.toString(); }
 
+    /** pdd 图床真实图片地址（排除 no_pic 占位）。 */
+    private boolean isRealImg(String p) {
+        return p != null && p.startsWith("http") && !p.contains("no_pic");
+    }
+
+    /**
+     * 按 outerId / skuOuterId 从缓存取白底图 URL。
+     * SKU 级 skuPicPath 优先，缺则回退商品级 picPath；no_pic 视为无图。无图返回 null。
+     */
+    @SuppressWarnings("unchecked")
+    public String findWhiteImageUrl(String code) throws Exception {
+        if (code == null || code.isBlank()) return null;
+        for (Map<String, Object> item : getAllSkuItemsCached()) {
+            List<Map<String, Object>> skus = (List<Map<String, Object>>) item.get("skus");
+            if (skus != null) {
+                for (Map<String, Object> sk : skus) {
+                    if (code.equals(str(sk.get("skuOuterId")))) {
+                        String p = str(sk.get("skuPicPath"));
+                        if (isRealImg(p)) return p;
+                    }
+                }
+            }
+            if (code.equals(str(item.get("outerId")))) {
+                String p = str(item.get("picPath"));
+                if (isRealImg(p)) return p;
+            }
+        }
+        return null;
+    }
+
     private String firstNonBlank(String... vals) {
         for (String v : vals) if (v != null && !v.isBlank()) return v;
         return "";

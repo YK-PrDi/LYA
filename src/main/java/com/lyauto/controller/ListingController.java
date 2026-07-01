@@ -318,6 +318,44 @@ public class ListingController {
         }
     }
 
+    /** 产品信息预设库：读取原始 JSON（前端编辑器用）。 */
+    @GetMapping("/product-info-presets")
+    public ResponseEntity<String> getProductInfoPresets() {
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .body(listingService.loadProductInfoJson());
+    }
+
+    /** 产品信息预设库：保存。 */
+    @PostMapping("/product-info-presets")
+    public ResponseEntity<Map<String, Object>> saveProductInfoPresets(@RequestBody String json) {
+        try {
+            listingService.saveProductInfoJson(json);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "保存产品信息预设失败：" + e.getMessage()));
+        }
+    }
+
+    /** 商品标题库：读取原始 JSON（前端编辑器用）。 */
+    @GetMapping("/title-lib")
+    public ResponseEntity<String> getTitleLib() {
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .body(listingService.loadTitleLibJson());
+    }
+
+    /** 商品标题库：保存。 */
+    @PostMapping("/title-lib")
+    public ResponseEntity<Map<String, Object>> saveTitleLib(@RequestBody String json) {
+        try {
+            listingService.saveTitleLibJson(json);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "保存标题库失败：" + e.getMessage()));
+        }
+    }
+
     /**
      * AI 生成多套 SKU 布局和定价方案。
      * 入参：{ category, productName, brand, material, skus:[{itemCode,cost}], pricingStrategy, planCount }

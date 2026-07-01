@@ -142,7 +142,8 @@
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
         <span style="font-size:0.78rem;font-weight:700;color:var(--primary);">📝 产品信息</span>
         <span style="font-size:0.66rem;color:var(--text-dim);">选好品类后自动预填，可编辑</span>
-        <button type="button" onclick="lstAddAttr()" style="margin-left:auto;font-size:0.66rem;padding:2px 8px;border:1px solid var(--primary);border-radius:5px;background:var(--primary-light);cursor:pointer;color:var(--primary);">+ 新增属性</button>
+        <button type="button" onclick="openProductInfoEditor()" style="margin-left:auto;font-size:0.66rem;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">📋 预设库</button>
+        <button type="button" onclick="lstAddAttr()" style="font-size:0.66rem;padding:2px 8px;border:1px solid var(--primary);border-radius:5px;background:var(--primary-light);cursor:pointer;color:var(--primary);">+ 新增属性</button>
       </div>
       <div id="lstAttrList" style="display:flex;flex-direction:column;gap:6px;"></div>
       <div id="lstAttrEmpty" style="font-size:0.72rem;color:var(--text-dim);padding:8px 0;">请先选择商品品类</div>
@@ -162,6 +163,7 @@
         <span style="font-size:0.7rem;color:var(--text-dim);">SKU 列表</span>
         <span id="lstSkuCount" style="font-size:0.66rem;color:var(--text-dim);"></span>
         <button type="button" id="lstGenImgBtn" onclick="openSkuImgModal()" style="margin-left:auto;font-size:0.66rem;padding:2px 8px;border:1px solid #16a34a;border-radius:5px;background:#f0fdf4;cursor:pointer;color:#16a34a;">🎨 生成SKU图</button>
+        <button type="button" onclick="lstFetchWhiteFromErp()" style="font-size:0.66rem;padding:2px 8px;border:1px solid #16a34a;border-radius:5px;background:#f0fdf4;cursor:pointer;color:#16a34a;">📥 从快麦取白底图</button>
         <button type="button" onclick="lstImportWhite()" style="font-size:0.66rem;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">⬜ 导入白底图</button>
         <button type="button" onclick="lstExportSkuImages()" style="font-size:0.66rem;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">💾 导出SKU图</button>
         <button type="button" onclick="lstImportSkuImages()" style="font-size:0.66rem;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;color:var(--text-muted);">📂 导入SKU图</button>
@@ -332,6 +334,21 @@
     <div class="modal-footer">
       <button class="btn-outline" style="flex:1" onclick="closeRuleEditor()">取消</button>
       <button class="btn-primary" style="flex:2" onclick="saveRules()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 产品信息预设库编辑 -->
+<div id="piPresetModal" class="modal-overlay">
+  <div class="modal-card" style="width:720px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;">
+    <div class="modal-header"><h3>📝 产品信息预设库</h3><button class="close-btn" onclick="closeProductInfoEditor()">×</button></div>
+    <div style="padding:10px 20px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-dim);flex-shrink:0;">
+      JSON 直接编辑。键=品类全路径（如「家装主材 &gt; 卫浴配件 &gt; 花洒配件 &gt; 花洒喷头」），值=属性数组 [{name,value,options:[],manual}]。manual=true 表示人工选择，options 为可选项。选品类后自动预填。
+    </div>
+    <textarea id="piPresetJson" style="flex:1;min-height:320px;margin:12px 20px;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:monospace;font-size:0.72rem;resize:vertical;"></textarea>
+    <div class="modal-footer">
+      <button class="btn-outline" style="flex:1" onclick="closeProductInfoEditor()">取消</button>
+      <button class="btn-primary" style="flex:2" onclick="saveProductInfoPresets()">保存</button>
     </div>
   </div>
 </div>
